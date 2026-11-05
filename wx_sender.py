@@ -214,7 +214,7 @@ class WeChatSender:
     def _set_text_checked(self, obj, text, label="输入框"):
         """按实测有效顺序写入文本，并校验结果。
 
-        本机（Android 16 / 微信 8.x）实测：selector.set_text 有效；
+        在 Android 16 / 微信 8.x 上实测：selector.set_text 有效；
         d.send_keys 会静默失败（剪贴板有值但输入框没变），剪贴板长按粘贴也不可用。
         """
         try:
