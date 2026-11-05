@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from wx_sender import SendError, WeChatSender, load_config, setup_adb
+    from sender import SendError, create_sender, load_config, setup_adb
 except ModuleNotFoundError as exc:
     print(
         f"[环境错误] 缺少依赖 {exc.name}。请用项目虚拟环境运行：\n"
@@ -68,7 +68,7 @@ def main() -> int:
 
     target = args.to or cfg.get("default_target", "文件传输助手")
     dry_run = True if args.dry_run else None
-    sender = WeChatSender(cfg=cfg, serial=args.serial, dry_run=dry_run)
+    sender = create_sender(cfg=cfg, serial=args.serial, dry_run=dry_run)
     try:
         sender.connect()
         if args.dump:

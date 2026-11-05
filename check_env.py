@@ -12,7 +12,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 try:
     import uiautomator2 as u2
-    from wx_sender import ROOT, load_config, setup_adb
+    from sender import ROOT, load_config, setup_adb
 except ModuleNotFoundError as exc:
     print(
         f"[环境错误] 缺少依赖 {exc.name}。请用项目虚拟环境运行：\n"

@@ -15,13 +15,28 @@
 ```mermaid
 flowchart LR
   A[Vue 控制台] -->|REST /api| B[FastAPI server]
-  B --> C[wx_sender 发送链路]
+  B --> C[sender/ 发送模块]
   C -->|uiautomator2 / adb| D[安卓手机上的微信]
   B --> E[(SQLite bot.db)]
   C --> F[debug 截图与界面层级]
 ```
 
 所有业务逻辑都在电脑上，手机只是被控终端，不需要在手机上安装额外应用。`uiautomator2` 3.x 会在运行时通过 adb 拉起设备端服务，因此**不需要**执行旧版的 `python -m uiautomator2 init`。
+
+### 扩展发送通道
+
+`sender/` 是一个可插拔的包：
+
+| 文件 | 职责 |
+| --- | --- |
+| `base.py` | `Sender` 协议与 `SendError` |
+| `config.py` | 配置加载、adb 环境注入、模板自动生成 |
+| `text.py` | 文本规范化与校验探针（纯函数，不依赖设备） |
+| `store.py` | SQLite 发送日志 |
+| `u2.py` | 当前唯一实现 `U2Sender`，通过 uiautomator2 驱动手机 |
+| `__init__.py` | 统一导出与 `create_sender()` 工厂 |
+
+新增通道（例如 PC Hook、常驻无障碍 App）时：写一个实现 `send(target, text) -> bool` 的类，在 `create_sender()` 里注册一个分支，再把 `config.json` 的 `sender_channel` 改成对应名字即可。`server` 和 CLI 都通过工厂拿发送器，不需要改动。
 
 ## 环境要求
 
@@ -87,6 +102,7 @@ cd web && npm run dev
 | 字段 | 说明 |
 | --- | --- |
 | `adb_dir` | platform-tools 目录；留空则依赖系统 PATH 中的 adb |
+| `sender_channel` | 发送通道名，默认 `u2`；新增实现后在这里切换 |
 | `serial` | 设备序列号，留空自动选择；WiFi 连接填 `IP:端口` |
 | `default_target` | 默认会话名，模板为「文件传输助手」 |
 | `dry_run` | `true` 时只填文本不点发送，模板默认 `true` |

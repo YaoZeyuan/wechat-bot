@@ -2,6 +2,7 @@
   "adb_dir": "",
   "serial": "",
   "wechat_package": "com.tencent.mm",
+  "sender_channel": "u2",
   "default_target": "文件传输助手",
   "dry_run": true,
   "step_delay": 0.6,

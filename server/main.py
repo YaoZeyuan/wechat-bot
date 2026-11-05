@@ -25,10 +25,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from wx_sender import (  # noqa: E402
+from sender import (  # noqa: E402
     ROOT as APP_ROOT,
     SendError,
-    WeChatSender,
+    create_sender,
     load_config,
     normalize_text,
     setup_adb,
@@ -177,7 +177,7 @@ def send(req: SendRequest) -> dict[str, Any]:
     target = req.target or cfg.get("default_target", "文件传输助手")
     if not req.text or not req.text.strip():
         raise HTTPException(status_code=400, detail="发送内容为空")
-    sender = WeChatSender(cfg=cfg, serial=req.serial, dry_run=True if req.dry_run else None)
+    sender = create_sender(cfg=cfg, serial=req.serial, dry_run=True if req.dry_run else None)
     try:
         sender.connect()
         ok = sender.send(target, req.text)

@@ -1,97 +1,21 @@
-"""微信消息发送模块（uiautomator2 3.x）。
+"""uiautomator2 发送通道（当前唯一实现）。
 
 只负责「把一段文本发到指定会话」，不含统计与前端逻辑。
-3.x 移除了 atx-agent / init / connect_wifi / set_fastinput_ime，
-连接统一用 u2.connect(serial)，文本输入走 send_keys（剪贴板或 IME 广播）。
+uiautomator2 3.x 移除了 atx-agent / init / connect_wifi / set_fastinput_ime，
+连接统一用 u2.connect(serial)。
 """
 from __future__ import annotations
 
-import json
-import os
-import shutil
-import sqlite3
 import time
-import unicodedata
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import uiautomator2 as u2
 
-ROOT = Path(__file__).resolve().parent
-DEFAULT_CONFIG = ROOT / "config.json"
-
-
-class SendError(RuntimeError):
-    """发送链路中找不到控件或校验失败。"""
-
-
-def load_config(path: str | Path = DEFAULT_CONFIG) -> dict[str, Any]:
-    """读取本机私有配置；换机器首次运行时自动从模板生成一份。"""
-    path = Path(path)
-    if not path.exists():
-        example = ROOT / "config.example.json"
-        if not example.exists():
-            raise FileNotFoundError(f"缺少配置文件 {path}，也找不到模板 config.example.json")
-        shutil.copyfile(example, path)
-        print(f"[配置] 未找到 {path.name}，已从模板生成，请按本机环境修改后再用。")
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
-
-
-def setup_adb(cfg: dict[str, Any]) -> None:
-    """把本机 adb 目录临时塞进 PATH，让 adbutils 找得到 adb。"""
-    adb_dir = cfg.get("adb_dir", "")
-    if adb_dir and Path(adb_dir).is_dir():
-        os.environ["PATH"] = str(Path(adb_dir)) + os.pathsep + os.environ.get("PATH", "")
-
-
-def init_db(path: str | Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path))
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS send_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            target TEXT NOT NULL,
-            text TEXT NOT NULL,
-            ok INTEGER NOT NULL,
-            message TEXT NOT NULL,
-            dry_run INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL
-        )"""
-    )
-    conn.commit()
-    return conn
-
-
-def log_send(conn, target, text, ok, message, dry_run=False) -> None:
-    conn.execute(
-        "INSERT INTO send_log (target, text, ok, message, dry_run, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (target, text, 1 if ok else 0, message, 1 if dry_run else 0,
-         datetime.now().astimezone().isoformat(timespec="seconds")),
-    )
-    conn.commit()
-
-
-def normalize_text(text: str) -> str:
-    """规范化即将进入微信输入框的文本。
-
-    CRLF / CR 统一为 LF；移除 NUL、BEL、DEL 等控制字符，保留换行与制表符。
-    emoji、四字节汉字、零宽字符不受影响。
-    """
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return "".join(
-        ch for ch in text
-        if ch in ("\n", "\t") or unicodedata.category(ch) != "Cc"
-    )
-
-
-def text_probe(text: str) -> str:
-    """取首个非空行的前 8 个字符，用于发送后回查聊天记录。"""
-    for line in text.splitlines():
-        if line.strip():
-            return line.strip()[:8]
-    return ""
+from .base import SendError
+from .config import ROOT, load_config, setup_adb
+from .store import init_db, log_send
+from .text import normalize_text, text_probe
 
 
 def find(d, candidates):
@@ -117,7 +41,9 @@ def find_waiting(d, candidates, timeout=8.0, interval=0.4):
     return None, None
 
 
-class WeChatSender:
+class U2Sender:
+    """实现 sender.base.Sender 协议：通过 adb 驱动手机上的微信 UI。"""
+
     def __init__(self, cfg=None, serial=None, dry_run=None):
         self.cfg = cfg or load_config()
         setup_adb(self.cfg)
@@ -392,7 +318,8 @@ class WeChatSender:
             button, used = find_waiting(self.d, self.sel["send_button"], 5.0)
             if button is None:
                 raise SendError(
-                    "找不到「发送」按钮。用 python send.py --dump 看界面，改 selectors.send_button。"
+                    "找不到「发送」按钮。用 .venv/Scripts/python.exe send.py --dump "
+                    "看界面，改 selectors.send_button。"
                 )
             print(f"[发送] 按钮命中 {used}")
             button.click()
