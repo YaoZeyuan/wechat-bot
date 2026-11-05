@@ -1,0 +1,7 @@
+.venv/
+.workbuddy/
+debug/
+*.db
+__pycache__/
+*.pyc
+config.json

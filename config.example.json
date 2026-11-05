@@ -1,0 +1,46 @@
+{
+  "adb_dir": "",
+  "serial": "",
+  "wechat_package": "com.tencent.mm",
+  "default_target": "文件传输助手",
+  "dry_run": true,
+  "step_delay": 0.6,
+  "page_load_delay": 1.5,
+  "wait_timeout": 10.0,
+  "verify_timeout": 6.0,
+  "max_chars": 1800,
+  "debug_dir": "debug",
+  "database": "bot.db",
+  "result_class": "android.widget.TextView",
+  "selectors": {
+    "home_mark": [
+      {"text": "微信"},
+      {"description": "微信"},
+      {"text": "通讯录"}
+    ],
+    "search_entry": [
+      {"description": "搜索"},
+      {"text": "搜索"},
+      {"resourceId": "com.tencent.mm:id/f8y"}
+    ],
+    "search_input": [
+      {"resourceId": "com.tencent.mm:id/d98"},
+      {"className": "android.widget.EditText"},
+      {"focused": true, "className": "android.widget.EditText"}
+    ],
+    "chat_input": [
+      {"resourceId": "com.tencent.mm:id/bkk"},
+      {"className": "android.widget.EditText"}
+    ],
+    "send_button": [
+      {"text": "发送"},
+      {"resourceId": "com.tencent.mm:id/bql"},
+      {"description": "发送"}
+    ],
+    "paste_menu": [
+      {"text": "粘贴"},
+      {"text": "Paste"},
+      {"description": "粘贴"}
+    ]
+  }
+}
