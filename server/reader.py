@@ -15,7 +15,7 @@ from .sqlcipher_reader import SqlCipherReader
 from .automation import Automation, Rule
 from .plugins import HANDLERS
 from .polling import poll_group
-from .reply import MessageEvent
+from .reply import MessageEvent, SendTask
 
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
 log = logging.getLogger("uvicorn.error")
@@ -129,6 +129,25 @@ def preview_rule(request: RulePreview) -> dict:
 @router.get("/deliveries")
 def deliveries() -> dict:
     return {"items": automation.deliveries()}
+
+
+class PendingTask(BaseModel):
+    delivery_id: int
+    task: SendTask
+
+
+@router.get("/tasks", response_model=list[PendingTask])
+def pending_tasks() -> list[PendingTask]:
+    """List pending actions for the phone executor without claiming them."""
+    with automation.database() as db:
+        rows = db.execute(
+            "SELECT id, task FROM deliveries WHERE status='pending' AND task IS NOT NULL "
+            "ORDER BY id LIMIT 100"
+        ).fetchall()
+    return [
+        PendingTask(delivery_id=row["id"], task=SendTask.model_validate_json(row["task"]))
+        for row in rows
+    ]
 
 
 @router.post("/deliveries/{delivery_id}/retry")

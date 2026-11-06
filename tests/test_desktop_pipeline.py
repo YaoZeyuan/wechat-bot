@@ -3,12 +3,14 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from sqlcipher3 import dbapi2
 
 from server.automation import Automation, Rule
 from server.polling import poll_group
 from server.reply import SendTask
+from server.reader import pending_tasks
 from server.sqlcipher_reader import SqlCipherReader
 
 
@@ -55,6 +57,11 @@ class DesktopPipelineTest(unittest.TestCase):
                 task = SendTask.model_validate_json(deliveries[0]["task"])
                 self.assertEqual(task.trigger_message_id, "message_0:2")
                 self.assertEqual(task.reply.content.text, "测试成功")
+                with patch("server.reader.automation", restarted):
+                    tasks = pending_tasks()
+                self.assertEqual(len(tasks), 1)
+                self.assertEqual(tasks[0].delivery_id, deliveries[0]["id"])
+                self.assertEqual(tasks[0].task, task)
 
 
 if __name__ == "__main__":
