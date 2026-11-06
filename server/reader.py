@@ -1,15 +1,35 @@
 """Desktop message-source setup endpoints."""
 
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, SecretStr
 
 from .ciphertalk import CipherTalk, SourceError
 from .ciphertalk_cli import CipherTalkCLI
+from .automation import Automation, Rule
+from .plugins import HANDLERS
 
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
 log = logging.getLogger("uvicorn.error")
+automation = Automation(Path(__file__).resolve().parent.parent / "automation.db")
+
+
+@router.get("/rules")
+def rules() -> dict:
+    return {"items": automation.rules(), "handlers": [*HANDLERS, "webhook"]}
+
+
+@router.put("/rules")
+def save_rule(rule: Rule) -> Rule:
+    automation.save_rule(rule)
+    return rule
+
+
+@router.get("/deliveries")
+def deliveries() -> dict:
+    return {"items": automation.deliveries()}
 
 
 class SourceSettings(BaseModel):
