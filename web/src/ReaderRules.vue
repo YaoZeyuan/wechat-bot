@@ -61,6 +61,14 @@ function previewCurrentRule() {
   })
 }
 
+function submitMockMessage() {
+  return run(async () => {
+    const result = await api.submitMockMessage(rule.value.group_id, sample.value)
+    await load()
+    notice.value = `模拟消息处理结果：${result.status}`
+  })
+}
+
 function toggleMonitoring() {
   return run(async () => {
     monitoring.value = await api.setReaderStatus(!monitoring.value?.enabled)
@@ -124,6 +132,10 @@ onUnmounted(() => window.clearInterval(refreshTimer))
     </form>
     <label>试跑文本 <input v-model="sample" maxlength="4000" /></label>
     <button type="button" :disabled="busy || !rule.group_id || !rule.keyword" @click="previewCurrentRule">试跑当前规则</button>
+    <template v-if="monitoring?.mock_enabled">
+      <button type="button" :disabled="busy || !rule.group_id || !sample.trim()" @click="submitMockMessage">投递模拟消息</button>
+      <p>模拟投递使用已保存的规则，会调用匹配的 HTTP 回调并记录结果。</p>
+    </template>
     <div v-if="preview" role="status">
       <p>{{ preview.matched ? '关键词命中' : '关键词未命中' }}</p>
       <p v-if="preview.matched && preview.handler === 'webhook'">真实消息命中时将发送 HTTP 回调。试跑只检查匹配。</p>

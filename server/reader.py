@@ -80,7 +80,7 @@ async def reader_lifespan(app):
 
 @router.get("/status")
 def status() -> dict:
-    return dict(reader_status)
+    return {**reader_status, "mock_enabled": os.getenv("WECHAT_BOT_MOCK") == "1"}
 
 
 class MonitoringSettings(BaseModel):

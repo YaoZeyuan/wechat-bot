@@ -35,6 +35,7 @@ interface ReaderStatus {
   running: boolean
   error: string | null
   last_success_at: string | null
+  mock_enabled: boolean
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -56,6 +57,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  submitMockMessage: (group_id: string, text: string) =>
+    request<{ status: string }>('/reader/mock/messages', {
+      method: 'POST',
+      body: JSON.stringify({
+        group_id, text, messageId: crypto.randomUUID(), timestampMs: Date.now(),
+        direction: 'in', kind: 'text', sender: { username: 'mock-member' },
+      }),
+    }),
   readerStatus: () => request<ReaderStatus>('/reader/status'),
   setReaderStatus: (enabled: boolean) =>
     request<ReaderStatus>('/reader/status', { method: 'PUT', body: JSON.stringify({ enabled }) }),
