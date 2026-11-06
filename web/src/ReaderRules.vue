@@ -10,6 +10,8 @@ const deliveries = ref<Awaited<ReturnType<typeof api.readerDeliveries>>['items']
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
+const sample = ref('测试')
+const preview = ref<Awaited<ReturnType<typeof api.previewReaderRule>>>()
 const monitoring = ref<Awaited<ReturnType<typeof api.readerStatus>>>()
 const refreshError = ref('')
 let refreshTimer: number | undefined
@@ -46,6 +48,16 @@ function save() {
     })
     await load()
     notice.value = '规则已保存。'
+  })
+}
+
+function previewCurrentRule() {
+  preview.value = undefined
+  return run(async () => {
+    preview.value = await api.previewReaderRule({
+      ...rule.value,
+      url: rule.value.handler === 'webhook' ? rule.value.url : null,
+    }, sample.value)
   })
 }
 
@@ -110,6 +122,13 @@ onUnmounted(() => window.clearInterval(refreshTimer))
       <label class="check"><input v-model="rule.enabled" type="checkbox" />启用规则</label>
       <button :disabled="busy || !handlers.length">保存规则</button>
     </form>
+    <label>试跑文本 <input v-model="sample" maxlength="4000" /></label>
+    <button type="button" :disabled="busy || !rule.group_id || !rule.keyword" @click="previewCurrentRule">试跑当前规则</button>
+    <div v-if="preview" role="status">
+      <p>{{ preview.matched ? '关键词命中' : '关键词未命中' }}</p>
+      <p v-if="preview.matched && preview.handler === 'webhook'">真实消息命中时将发送 HTTP 回调。试跑只检查匹配。</p>
+      <pre v-if="preview.reply">{{ JSON.stringify(preview.reply, null, 2) }}</pre>
+    </div>
     <p v-if="error" class="message error" role="alert">{{ error }}</p>
     <p v-if="notice" class="message ok" role="status">{{ notice }}</p>
     <ul v-if="rules.length">

@@ -61,6 +61,10 @@ export const api = {
   readerRules: () => request<{ items: KeywordRule[]; handlers: string[] }>('/reader/rules'),
   saveReaderRule: (rule: KeywordRule) =>
     request<KeywordRule>('/reader/rules', { method: 'PUT', body: JSON.stringify(rule) }),
+  previewReaderRule: (rule: KeywordRule, text: string) =>
+    request<{ matched: boolean; handler: string; reply: unknown }>('/reader/rules/preview', {
+      method: 'POST', body: JSON.stringify({ rule, text }),
+    }),
   readerDeliveries: () => request<{ items: Delivery[] }>('/reader/deliveries'),
   retryReaderDelivery: (id: number) =>
     request<{ status: string }>(`/reader/deliveries/${id}/retry`, { method: 'POST', body: '{}' }),

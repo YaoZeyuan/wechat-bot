@@ -14,6 +14,7 @@ from .sqlcipher_reader import SqlCipherReader
 from .automation import Automation, Rule
 from .plugins import HANDLERS
 from .polling import poll_group
+from .reply import MessageEvent
 
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
 log = logging.getLogger("uvicorn.error")
@@ -101,6 +102,25 @@ def rules() -> dict:
 def save_rule(rule: Rule) -> Rule:
     automation.save_rule(rule)
     return rule
+
+
+class RulePreview(BaseModel):
+    rule: Rule
+    text: str = Field(max_length=4000)
+
+
+@router.post("/rules/preview")
+def preview_rule(request: RulePreview) -> dict:
+    rule = request.rule
+    matched = rule.enabled and request.text.strip() == rule.keyword
+    reply = None
+    if matched and rule.handler != "webhook":
+        event = MessageEvent(
+            group_id=rule.group_id, message_id="preview", sender_id="preview",
+            timestamp_ms=1, text=request.text,
+        )
+        reply = HANDLERS[rule.handler](event)
+    return {"matched": matched, "handler": rule.handler, "reply": reply}
 
 
 @router.get("/deliveries")
