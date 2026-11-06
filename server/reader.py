@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -19,13 +20,13 @@ from .reply import MessageEvent
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
 log = logging.getLogger("uvicorn.error")
 automation = Automation(Path(__file__).resolve().parent.parent / "automation.db")
-reader_status = {"enabled": False, "running": False, "error": None}
+reader_status = {"enabled": False, "running": False, "error": None, "last_success_at": None}
 
 
 def poll_once():
     groups = {rule.group_id for rule in automation.rules() if rule.enabled}
     if not groups:
-        return
+        return False
     source = SqlCipherReader.discover()
     errors = []
     for group_id in sorted(groups):
@@ -38,13 +39,14 @@ def poll_once():
             log.warning("Desktop polling failed for group=%s: %s", group_id, exc)
     if errors:
         raise SourceError(errors[0])
+    return bool(reader_status["enabled"])
 
 
 @asynccontextmanager
 async def reader_lifespan(app):
     await asyncio.to_thread(automation.recover_interrupted)
     enabled = await asyncio.to_thread(automation.monitoring_enabled, os.getenv("WECHAT_BOT_POLL") == "1")
-    reader_status.update(enabled=enabled, running=False, error=None)
+    reader_status.update(enabled=enabled, running=False, error=None, last_success_at=None)
     stop = asyncio.Event()
 
     async def worker():
@@ -52,7 +54,8 @@ async def reader_lifespan(app):
             if reader_status["enabled"]:
                 reader_status["running"] = True
                 try:
-                    await asyncio.to_thread(poll_once)
+                    if await asyncio.to_thread(poll_once):
+                        reader_status["last_success_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
                     reader_status["error"] = None
                 except Exception as exc:
                     error = str(exc) if isinstance(exc, SourceError) else type(exc).__name__

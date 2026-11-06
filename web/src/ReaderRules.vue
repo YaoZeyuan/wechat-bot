@@ -145,6 +145,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
     </div>
     <div v-if="monitoring">
       <p>监听{{ monitoring.enabled ? '已启用' : '已停用' }}{{ monitoring.running ? ' · 正在读取' : '' }}</p>
+      <p v-if="monitoring.last_success_at">最近成功读取 {{ new Date(monitoring.last_success_at).toLocaleString() }}</p>
       <p v-if="monitoring.error" class="message error" role="alert">{{ monitoring.error }}</p>
       <button :disabled="busy" @click="toggleMonitoring">{{ monitoring.enabled ? '停止监听' : '启动监听' }}</button>
     </div>

@@ -34,6 +34,7 @@ interface ReaderStatus {
   enabled: boolean
   running: boolean
   error: string | null
+  last_success_at: string | null
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
