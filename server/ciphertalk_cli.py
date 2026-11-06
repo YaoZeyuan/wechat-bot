@@ -17,16 +17,21 @@ class CipherTalkCLI:
         self.entry = root / ".venv" / "ciphertalk-cli" / "bin" / "miyu.js"
         bundled = Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe"
         self.node = os.environ.get("WECHAT_BOT_NODE") or (str(bundled) if bundled.is_file() else "node")
-        self.env = dict(os.environ)
+        self.env = self.local_settings()
         if not (self.entry.parent.parent / "dist/index.js").is_file():
             raise SourceError("请先构建本地密语 CLI")
-        appdata = os.environ.get("APPDATA")
+    @staticmethod
+    def local_settings():
+        env = dict(os.environ)
+        appdata = env.get("APPDATA")
         if appdata:
             path = Path(appdata) / "CipherTalk" / "ciphertalk-config.db"
             if path.is_file():
-                self._import_settings(path)
+                CipherTalkCLI._import_settings(path, env)
+        return env
 
-    def _import_settings(self, path: Path):
+    @staticmethod
+    def _import_settings(path: Path, env: dict):
         keys = ("accounts", "activeAccountId", "dbPath", "decryptKey", "myWxid")
         try:
             with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
@@ -44,7 +49,7 @@ class CipherTalkCLI:
             }.items():
                 if isinstance(value, str) and value:
                     if env_key != "MIYU_KEY_HEX" or re.fullmatch("[0-9a-fA-F]{64}", value):
-                        self.env.setdefault(env_key, value)
+                        env.setdefault(env_key, value)
         except (sqlite3.Error, ValueError, TypeError):
             raise SourceError("无法读取本机密语账号配置") from None
 

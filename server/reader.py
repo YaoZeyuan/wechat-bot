@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, SecretStr
 
 from .ciphertalk import CipherTalk, SourceError
-from .ciphertalk_cli import CipherTalkCLI
+from .sqlcipher_reader import SqlCipherReader
 from .automation import Automation, Rule
 from .plugins import HANDLERS
 from .polling import poll_group
@@ -25,8 +25,7 @@ def poll_once():
     groups = {rule.group_id for rule in automation.rules() if rule.enabled}
     if not groups:
         return
-    source = CipherTalkCLI()
-    source.check_connection()
+    source = SqlCipherReader.discover()
     errors = []
     for group_id in sorted(groups):
         try:
@@ -101,8 +100,7 @@ def probe(settings: SourceSettings) -> dict:
     """Check a source without exposing its token or returning chat content."""
     try:
         if settings.port is None:
-            source = CipherTalkCLI()
-            source.check_connection()
+            source = SqlCipherReader.discover()
         else:
             source = CipherTalk(settings.port, settings.token.get_secret_value())
         result = source.sessions(q=settings.query, limit=50)
@@ -112,10 +110,12 @@ def probe(settings: SourceSettings) -> dict:
             if item["kind"] == "group"
         ]
         message_readable = None
+        has_messages = None
         if settings.session_id:
             if not settings.session_id.endswith("@chatroom"):
                 raise HTTPException(422, "请选择微信群")
-            source.messages(settings.session_id, limit=1, includeRaw=False, includeMediaPaths=False)
+            messages = source.messages(settings.session_id, limit=1, includeRaw=False, includeMediaPaths=False)
+            has_messages = bool(messages.get("items"))
             message_readable = True
     except SourceError as exc:
         log.warning("Desktop reader probe failed: %s", exc)
@@ -124,4 +124,7 @@ def probe(settings: SourceSettings) -> dict:
         log.warning("Desktop reader received an unexpected CipherTalk response")
         raise HTTPException(502, "密语代理返回了不兼容的会话数据") from None
     log.info("Desktop reader probe succeeded; groups=%d, message_readable=%s", len(groups), message_readable)
-    return {"groups": groups, "has_more": bool(result.get("hasMore")), "message_readable": message_readable}
+    return {
+        "groups": groups, "has_more": bool(result.get("hasMore")),
+        "message_readable": message_readable, "has_messages": has_messages,
+    }

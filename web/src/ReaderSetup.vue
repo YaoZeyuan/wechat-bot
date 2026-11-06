@@ -26,7 +26,7 @@ async function probe(checkMessages = false) {
     groups.value = result.groups
     if (!groups.value.some((group) => group.id === selected.value)) selected.value = ''
     notice.value = result.message_readable
-      ? '已验证所选群的消息读取。'
+      ? result.has_messages ? '已验证所选群的消息读取。' : '消息库查询成功，但所选群目前没有本地消息记录。'
       : `连接成功，找到 ${result.groups.length} 个群。${result.has_more ? '可输入群名缩小范围。' : ''}`
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -39,10 +39,10 @@ async function probe(checkMessages = false) {
 <template>
   <section class="card">
     <h2>电脑端微信读取</h2>
-    <p>默认使用本地构建的密语 CLI 读取微信数据库。也可以连接已启动的兼容本地代理。</p>
+    <p>默认使用 SQLCipher 只读查询微信数据库，并自动读取本机账号配置。也可以连接已启动的兼容本地代理。</p>
     <label>
       <select v-model="automatic">
-        <option :value="true">本地源码 CLI（自动读取本机设置）</option>
+        <option :value="true">SQLCipher（自动读取本机设置）</option>
         <option :value="false">手动填写代理端口和令牌</option>
       </select>
     </label>
