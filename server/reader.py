@@ -6,6 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, SecretStr
@@ -14,7 +15,7 @@ from .ciphertalk import CipherTalk, SourceError
 from .sqlcipher_reader import SqlCipherReader
 from .automation import Automation, Rule
 from .plugins import HANDLERS
-from .polling import poll_group
+from .polling import incoming_text, message_id, poll_group
 from .reply import MessageEvent, SendTask
 
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
@@ -126,6 +127,30 @@ def preview_rule(request: RulePreview) -> dict:
     return {"matched": matched, "handler": rule.handler, "reply": reply}
 
 
+class MockMessage(BaseModel):
+    group_id: str = Field(min_length=1, max_length=256)
+    messageId: str = Field(min_length=1, max_length=256)
+    timestampMs: int = Field(gt=0)
+    direction: Literal["in", "out"] = "in"
+    kind: Literal["text", "other"] = "text"
+    sender: dict[str, str]
+    text: str = Field(max_length=4000)
+
+
+@router.post("/mock/messages")
+def dispatch_mock(message: MockMessage) -> dict:
+    """Run a fixture through the normal rule engine without accessing WeChat."""
+    if os.getenv("WECHAT_BOT_MOCK") != "1":
+        raise HTTPException(404)
+    row = message.model_dump()
+    row["messageId"] = "mock:" + message_id(row)
+    try:
+        event = incoming_text(message.group_id, row, row["messageId"])
+    except SourceError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return {"status": automation.dispatch(event) if event else "ignored"}
+
+
 @router.get("/deliveries")
 def deliveries() -> dict:
     return {"items": automation.deliveries()}
@@ -148,6 +173,37 @@ def pending_tasks() -> list[PendingTask]:
         PendingTask(delivery_id=row["id"], task=SendTask.model_validate_json(row["task"]))
         for row in rows
     ]
+
+
+@router.post("/tasks/{delivery_id}/claim", response_model=PendingTask)
+def claim_task(delivery_id: int) -> PendingTask:
+    with automation.database() as db:
+        row = db.execute(
+            "UPDATE deliveries SET status='sending' WHERE id=? AND status='pending' "
+            "AND task IS NOT NULL RETURNING task", (delivery_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(409, "任务已被领取或不可领取")
+        task = SendTask.model_validate_json(row["task"])
+    log.info("Phone task claimed id=%s", delivery_id)
+    return PendingTask(delivery_id=delivery_id, task=task)
+
+
+class TaskResult(BaseModel):
+    status: Literal["sent", "send_failed"]
+
+
+@router.put("/tasks/{delivery_id}/result")
+def finish_task(delivery_id: int, result: TaskResult) -> TaskResult:
+    with automation.database() as db:
+        changed = db.execute(
+            "UPDATE deliveries SET status=? WHERE id=? AND status IN ('sending', ?)",
+            (result.status, delivery_id, result.status),
+        ).rowcount
+        if not changed:
+            raise HTTPException(409, "任务未领取或已有不同执行结果")
+    log.info("Phone task result id=%s status=%s", delivery_id, result.status)
+    return result
 
 
 @router.post("/deliveries/{delivery_id}/retry")

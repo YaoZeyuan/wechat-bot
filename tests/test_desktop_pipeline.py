@@ -6,11 +6,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sqlcipher3 import dbapi2
+from fastapi import HTTPException
 
 from server.automation import Automation, Rule
 from server.polling import poll_group
 from server.reply import SendTask
-from server.reader import pending_tasks
+from server.reader import TaskResult, claim_task, finish_task, pending_tasks
 from server.sqlcipher_reader import SqlCipherReader
 
 
@@ -62,6 +63,15 @@ class DesktopPipelineTest(unittest.TestCase):
                 self.assertEqual(len(tasks), 1)
                 self.assertEqual(tasks[0].delivery_id, deliveries[0]["id"])
                 self.assertEqual(tasks[0].task, task)
+                with patch("server.reader.automation", restarted):
+                    delivery_id = tasks[0].delivery_id
+                    self.assertEqual(claim_task(delivery_id), tasks[0])
+                    self.assertEqual(pending_tasks(), [])
+                    with self.assertRaises(HTTPException):
+                        claim_task(delivery_id)
+                    result = TaskResult(status="sent")
+                    self.assertEqual(finish_task(delivery_id, result), result)
+                    self.assertEqual(finish_task(delivery_id, result), result)
 
 
 if __name__ == "__main__":
