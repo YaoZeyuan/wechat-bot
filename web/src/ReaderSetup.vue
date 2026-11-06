@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { api } from './api'
+import ReaderRules from './ReaderRules.vue'
 
 const query = ref('')
 const automatic = ref(true)
@@ -65,4 +66,5 @@ async function probe(checkMessages = false) {
     <p v-if="error" class="message error" role="alert">{{ error }}</p>
     <p v-if="notice" class="message ok" role="status">{{ notice }}</p>
   </section>
+  <ReaderRules :groups="groups" :selected="selected" />
 </template>

@@ -11,6 +11,25 @@ import type {
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
+export interface KeywordRule {
+  group_id: string
+  keyword: string
+  handler: string
+  url: string | null
+  enabled: boolean
+}
+
+interface Delivery {
+  id: number
+  group_id: string
+  message_id: string
+  handler: string
+  status: string
+  task: string | null
+  error: string | null
+  created_at: string
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     ...init,
@@ -30,6 +49,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  readerRules: () => request<{ items: KeywordRule[]; handlers: string[] }>('/reader/rules'),
+  saveReaderRule: (rule: KeywordRule) =>
+    request<KeywordRule>('/reader/rules', { method: 'PUT', body: JSON.stringify(rule) }),
+  readerDeliveries: () => request<{ items: Delivery[] }>('/reader/deliveries'),
   probeReader: (payload: { query: string; port?: number; token?: string; session_id?: string }) =>
     request<{ groups: { id: string; name: string }[]; has_more: boolean; message_readable: boolean | null }>('/reader/probe', {
       method: 'POST',
