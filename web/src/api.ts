@@ -62,6 +62,8 @@ export const api = {
   saveReaderRule: (rule: KeywordRule) =>
     request<KeywordRule>('/reader/rules', { method: 'PUT', body: JSON.stringify(rule) }),
   readerDeliveries: () => request<{ items: Delivery[] }>('/reader/deliveries'),
+  retryReaderDelivery: (id: number) =>
+    request<{ status: string }>(`/reader/deliveries/${id}/retry`, { method: 'POST', body: '{}' }),
   probeReader: (payload: { query: string; port?: number; token?: string; session_id?: string }) =>
     request<{ groups: { id: string; name: string }[]; has_more: boolean; message_readable: boolean | null; has_messages: boolean | null }>('/reader/probe', {
       method: 'POST',

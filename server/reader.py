@@ -41,6 +41,7 @@ def poll_once():
 
 @asynccontextmanager
 async def reader_lifespan(app):
+    await asyncio.to_thread(automation.recover_interrupted)
     enabled = await asyncio.to_thread(automation.monitoring_enabled, os.getenv("WECHAT_BOT_POLL") == "1")
     reader_status.update(enabled=enabled, running=False, error=None)
     stop = asyncio.Event()
@@ -105,6 +106,14 @@ def save_rule(rule: Rule) -> Rule:
 @router.get("/deliveries")
 def deliveries() -> dict:
     return {"items": automation.deliveries()}
+
+
+@router.post("/deliveries/{delivery_id}/retry")
+def retry_delivery(delivery_id: int) -> dict:
+    result = automation.retry(delivery_id)
+    if result is None:
+        raise HTTPException(409, "此投递没有可重试的失败记录")
+    return {"status": result}
 
 
 class SourceSettings(BaseModel):

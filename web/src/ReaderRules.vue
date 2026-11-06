@@ -52,6 +52,13 @@ function toggleMonitoring() {
   })
 }
 
+function retry(id: number) {
+  return run(async () => {
+    await api.retryReaderDelivery(id)
+    await load()
+  })
+}
+
 onMounted(() => run(load))
 </script>
 
@@ -103,6 +110,7 @@ onMounted(() => run(load))
       <li v-for="item in deliveries" :key="item.id">
         {{ item.created_at }} UTC · {{ item.group_id }} · {{ item.handler }} · {{ item.status }}
         <span v-if="item.error"> · {{ item.error }}</span>
+        <button v-if="item.status === 'failed'" :disabled="busy" @click="retry(item.id)">重试</button>
         <details v-if="item.task">
           <summary>待发送任务</summary>
           <pre>{{ JSON.stringify(JSON.parse(item.task), null, 2) }}</pre>

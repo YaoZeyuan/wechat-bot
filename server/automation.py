@@ -56,6 +56,9 @@ class Automation:
                 CREATE TABLE IF NOT EXISTS reader_settings (
                     id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS delivery_inputs (
+                    id INTEGER PRIMARY KEY, event TEXT NOT NULL, rule TEXT NOT NULL
+                );
             """)
             yield db
 
@@ -122,7 +125,36 @@ class Automation:
             if inserted.rowcount == 0:
                 return "duplicate"
             delivery_id = inserted.lastrowid
+            db.execute(
+                "INSERT INTO delivery_inputs VALUES (?, ?, ?)",
+                (delivery_id, event.model_dump_json(), rule.model_dump_json()),
+            )
 
+        return self.execute(delivery_id, rule, event)
+
+    def retry(self, delivery_id: int) -> str | None:
+        with self.database() as db:
+            claimed = db.execute(
+                "UPDATE deliveries SET status='processing', error=NULL "
+                "WHERE id=? AND status='failed' AND EXISTS (SELECT 1 FROM delivery_inputs WHERE id=?)",
+                (delivery_id, delivery_id),
+            )
+            if not claimed.rowcount:
+                return None
+            row = db.execute("SELECT event, rule FROM delivery_inputs WHERE id=?", (delivery_id,)).fetchone()
+            event = MessageEvent.model_validate_json(row["event"])
+            rule = Rule.model_validate_json(row["rule"])
+        return self.execute(delivery_id, rule, event)
+
+    def recover_interrupted(self):
+        with self.database() as db:
+            count = db.execute(
+                "UPDATE deliveries SET status='failed', error='Interrupted' WHERE status='processing'"
+            ).rowcount
+        if count:
+            log.warning("Marked %d interrupted deliveries for manual retry", count)
+
+    def execute(self, delivery_id: int, rule: Rule, event: MessageEvent) -> Literal["pending", "acknowledged", "failed"]:
         task = error = None
         try:
             reply = (
@@ -140,5 +172,7 @@ class Automation:
                 "UPDATE deliveries SET status=?,task=?,error=? WHERE id=?",
                 (status, task, error, delivery_id),
             )
+            if status != "failed":
+                db.execute("DELETE FROM delivery_inputs WHERE id=?", (delivery_id,))
         log.info("Keyword delivery id=%s handler=%s status=%s error=%s", delivery_id, rule.handler, status, error)
         return status
