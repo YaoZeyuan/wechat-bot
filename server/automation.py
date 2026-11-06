@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import HttpUrl, model_validator
 
-from .plugins import HANDLERS, call_webhook
+from .plugins import HANDLERS, WebhookError, call_webhook
 from .reply import ContractModel, MessageEvent, NonEmpty, SendTask
 
 log = logging.getLogger("uvicorn.error")
@@ -166,7 +166,7 @@ class Automation:
                 task = SendTask.from_event(event, reply).model_dump_json()
         except Exception as exc:
             status = "failed"
-            error = type(exc).__name__
+            error = str(exc) if isinstance(exc, WebhookError) else type(exc).__name__
         with self.database() as db:
             db.execute(
                 "UPDATE deliveries SET status=?,task=?,error=? WHERE id=?",

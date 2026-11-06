@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Callable
+from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 from pydantic import HttpUrl
@@ -11,6 +12,10 @@ from .reply import MessageEvent, Reply, Text
 
 log = logging.getLogger("uvicorn.error")
 MAX_REPLY_BYTES = 256 * 1024
+
+
+class WebhookError(RuntimeError):
+    """A diagnostic safe to show in the console."""
 
 
 def fixed_reply(event: MessageEvent) -> Reply:
@@ -37,8 +42,15 @@ def call_webhook(url: HttpUrl, event: MessageEvent, delivery_id: str) -> Reply |
                 return None
             data = response.read(MAX_REPLY_BYTES + 1)
         if len(data) > MAX_REPLY_BYTES:
-            raise ValueError("Webhook response too large")
+            raise WebhookError("回调响应超过 256 KiB")
         reply = Reply.model_validate_json(data)
+    except HTTPError as exc:
+        exc.close()
+        raise WebhookError(f"回调服务返回 HTTP {exc.code}") from None
+    except (URLError, OSError):
+        raise WebhookError("无法连接回调服务或读取响应超时") from None
+    except ValueError:
+        raise WebhookError("回调响应不符合回复协议") from None
     except Exception as exc:
         log.warning("Webhook delivery failed id=%s error=%s", delivery_id, type(exc).__name__)
         raise
