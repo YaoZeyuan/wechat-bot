@@ -4,7 +4,10 @@ import { api } from './api'
 import ReaderRules from './ReaderRules.vue'
 
 const query = ref('')
-const automatic = ref(true)
+const mode = ref('automatic')
+const databasePath = ref('')
+const account = ref('')
+const databaseKey = ref('')
 const port = ref(5032)
 const token = ref('')
 const groups = ref<{ id: string; name: string }[]>([])
@@ -20,7 +23,12 @@ async function probe(checkMessages = false) {
   try {
     const result = await api.probeReader({
       query: query.value.trim(),
-      ...(automatic.value ? {} : { port: port.value, token: token.value }),
+      ...(mode.value === 'proxy' ? { port: port.value, token: token.value } : {}),
+      ...(mode.value === 'manual' ? {
+        database_path: databasePath.value.trim(),
+        account: account.value.trim(),
+        database_key: databaseKey.value.trim(),
+      } : {}),
       ...(checkMessages ? { session_id: selected.value } : {}),
     })
     groups.value = result.groups
@@ -41,14 +49,21 @@ async function probe(checkMessages = false) {
     <h2>电脑端微信读取</h2>
     <p>默认使用 SQLCipher 只读查询微信数据库，并自动读取本机账号配置。也可以连接已启动的兼容本地代理。</p>
     <label>
-      <select v-model="automatic">
-        <option :value="true">SQLCipher（自动读取本机设置）</option>
-        <option :value="false">手动填写代理端口和令牌</option>
+      <select v-model="mode">
+        <option value="automatic">SQLCipher（自动读取本机设置）</option>
+        <option value="manual">SQLCipher（手动验证）</option>
+        <option value="proxy">手动填写代理端口和令牌</option>
       </select>
     </label>
-    <template v-if="!automatic">
+    <template v-if="mode === 'proxy'">
       <label>本机端口 <input v-model.number="port" type="number" min="1" max="65535" /></label>
       <label>访问令牌 <input v-model="token" type="password" autocomplete="off" /></label>
+    </template>
+    <template v-if="mode === 'manual'">
+      <label>数据库目录 <input v-model="databasePath" placeholder="账号目录或 db_storage" /></label>
+      <label>微信账号 ID <input v-model="account" /></label>
+      <label>数据库密钥 <input v-model="databaseKey" type="password" autocomplete="off" /></label>
+      <p>这些字段只用于本次验证。后台监听使用本机设置或 MIYU_DB_PATH、MIYU_WXID、MIYU_KEY_HEX 环境变量。</p>
     </template>
     <form @submit.prevent="probe()">
       <label>群名 <input v-model="query" placeholder="输入群名以缩小范围" /></label>

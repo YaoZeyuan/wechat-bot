@@ -64,7 +64,7 @@ export const api = {
   readerDeliveries: () => request<{ items: Delivery[] }>('/reader/deliveries'),
   retryReaderDelivery: (id: number) =>
     request<{ status: string }>(`/reader/deliveries/${id}/retry`, { method: 'POST', body: '{}' }),
-  probeReader: (payload: { query: string; port?: number; token?: string; session_id?: string }) =>
+  probeReader: (payload: { query: string; port?: number; token?: string; session_id?: string; database_path?: string; account?: string; database_key?: string }) =>
     request<{ groups: { id: string; name: string }[]; has_more: boolean; message_readable: boolean | null; has_messages: boolean | null }>('/reader/probe', {
       method: 'POST',
       body: JSON.stringify(payload),

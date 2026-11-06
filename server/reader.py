@@ -121,13 +121,24 @@ class SourceSettings(BaseModel):
     token: SecretStr = SecretStr("")
     query: str = Field(default="", max_length=100)
     session_id: str | None = Field(default=None, max_length=256)
+    database_path: str | None = Field(default=None, max_length=1024)
+    account: str = Field(default="", max_length=256)
+    database_key: SecretStr = SecretStr("")
 
 
 @router.post("/probe")
 def probe(settings: SourceSettings) -> dict:
     """Check a source without exposing its token or returning chat content."""
     try:
-        if settings.port is None:
+        if settings.database_path:
+            if not settings.account:
+                raise HTTPException(422, "请填写微信账号 ID")
+            source = SqlCipherReader(
+                Path(settings.database_path).expanduser().resolve(),
+                settings.database_key.get_secret_value(),
+                settings.account,
+            )
+        elif settings.port is None:
             source = SqlCipherReader.discover()
         else:
             source = CipherTalk(settings.port, settings.token.get_secret_value())
