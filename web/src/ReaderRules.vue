@@ -10,14 +10,16 @@ const deliveries = ref<Awaited<ReturnType<typeof api.readerDeliveries>>['items']
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
+const monitoring = ref<Awaited<ReturnType<typeof api.readerStatus>>>()
 
 watch(() => props.selected, (id) => { if (id) rule.value.group_id = id })
 
 async function load() {
-  const [config, runs] = await Promise.all([api.readerRules(), api.readerDeliveries()])
+  const [config, runs, status] = await Promise.all([api.readerRules(), api.readerDeliveries(), api.readerStatus()])
   rules.value = config.items
   handlers.value = config.handlers
   deliveries.value = runs.items
+  monitoring.value = status
 }
 
 async function run(action: () => Promise<void>) {
@@ -41,6 +43,12 @@ function save() {
     })
     await load()
     notice.value = '规则已保存。'
+  })
+}
+
+function toggleMonitoring() {
+  return run(async () => {
+    monitoring.value = await api.setReaderStatus(!monitoring.value?.enabled)
   })
 }
 
@@ -84,6 +92,11 @@ onMounted(() => run(load))
     <div class="card-head">
       <h2>规则执行和待发送记录</h2>
       <button :disabled="busy" @click="run(load)">刷新</button>
+    </div>
+    <div v-if="monitoring">
+      <p>监听{{ monitoring.enabled ? '已启用' : '已停用' }}{{ monitoring.running ? ' · 正在读取' : '' }}</p>
+      <p v-if="monitoring.error" class="message error" role="alert">{{ monitoring.error }}</p>
+      <button :disabled="busy" @click="toggleMonitoring">{{ monitoring.enabled ? '停止监听' : '启动监听' }}</button>
     </div>
     <p v-if="!deliveries.length">暂无执行记录。</p>
     <ul v-else>

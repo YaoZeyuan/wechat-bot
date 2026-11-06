@@ -30,6 +30,12 @@ interface Delivery {
   created_at: string
 }
 
+interface ReaderStatus {
+  enabled: boolean
+  running: boolean
+  error: string | null
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     ...init,
@@ -49,6 +55,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  readerStatus: () => request<ReaderStatus>('/reader/status'),
+  setReaderStatus: (enabled: boolean) =>
+    request<ReaderStatus>('/reader/status', { method: 'PUT', body: JSON.stringify({ enabled }) }),
   readerRules: () => request<{ items: KeywordRule[]; handlers: string[] }>('/reader/rules'),
   saveReaderRule: (rule: KeywordRule) =>
     request<KeywordRule>('/reader/rules', { method: 'PUT', body: JSON.stringify(rule) }),

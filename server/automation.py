@@ -53,8 +53,23 @@ class Automation:
                 CREATE TABLE IF NOT EXISTS reader_cursors (
                     group_id TEXT PRIMARY KEY, message_id TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS reader_settings (
+                    id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL
+                );
             """)
             yield db
+
+    def monitoring_enabled(self, default: bool = False) -> bool:
+        with self.database() as db:
+            row = db.execute("SELECT enabled FROM reader_settings WHERE id=1").fetchone()
+            return bool(row["enabled"]) if row is not None else default
+
+    def set_monitoring(self, enabled: bool):
+        with self.database() as db:
+            db.execute(
+                "INSERT INTO reader_settings VALUES (1, ?) ON CONFLICT(id) "
+                "DO UPDATE SET enabled=excluded.enabled", (enabled,),
+            )
 
     def save_rule(self, rule: Rule):
         with self.database() as db:
