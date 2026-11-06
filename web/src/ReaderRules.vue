@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { api, type KeywordRule } from './api'
 
 const props = defineProps<{ groups: { id: string; name: string }[]; selected: string }>()
@@ -11,6 +11,9 @@ const busy = ref(false)
 const error = ref('')
 const notice = ref('')
 const monitoring = ref<Awaited<ReturnType<typeof api.readerStatus>>>()
+const refreshError = ref('')
+let refreshTimer: number | undefined
+let refreshing = false
 
 watch(() => props.selected, (id) => { if (id) rule.value.group_id = id })
 
@@ -59,7 +62,28 @@ function retry(id: number) {
   })
 }
 
-onMounted(() => run(load))
+async function refreshMonitoring() {
+  if (busy.value || refreshing || document.hidden) return
+  refreshing = true
+  try {
+    const [status, runs] = await Promise.all([api.readerStatus(), api.readerDeliveries()])
+    if (!busy.value) {
+      monitoring.value = status
+      deliveries.value = runs.items
+    }
+    refreshError.value = ''
+  } catch (err) {
+    refreshError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    refreshing = false
+  }
+}
+
+onMounted(() => {
+  void run(load)
+  refreshTimer = window.setInterval(refreshMonitoring, 5000)
+})
+onUnmounted(() => window.clearInterval(refreshTimer))
 </script>
 
 <template>
@@ -105,6 +129,7 @@ onMounted(() => run(load))
       <p v-if="monitoring.error" class="message error" role="alert">{{ monitoring.error }}</p>
       <button :disabled="busy" @click="toggleMonitoring">{{ monitoring.enabled ? '停止监听' : '启动监听' }}</button>
     </div>
+    <p v-if="refreshError" class="message error" role="status">自动刷新失败：{{ refreshError }}</p>
     <p v-if="!deliveries.length">暂无执行记录。</p>
     <ul v-else>
       <li v-for="item in deliveries" :key="item.id">
