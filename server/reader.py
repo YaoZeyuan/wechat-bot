@@ -1,6 +1,9 @@
 """Desktop message-source setup endpoints."""
 
 import logging
+import os
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -10,10 +13,64 @@ from .ciphertalk import CipherTalk, SourceError
 from .ciphertalk_cli import CipherTalkCLI
 from .automation import Automation, Rule
 from .plugins import HANDLERS
+from .polling import poll_group
 
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
 log = logging.getLogger("uvicorn.error")
 automation = Automation(Path(__file__).resolve().parent.parent / "automation.db")
+reader_status = {"enabled": False, "error": None}
+
+
+def poll_once():
+    groups = {rule.group_id for rule in automation.rules() if rule.enabled}
+    if not groups:
+        return
+    source = CipherTalkCLI()
+    source.check_connection()
+    errors = []
+    for group_id in sorted(groups):
+        try:
+            poll_group(source, automation, group_id)
+        except SourceError as exc:
+            errors.append(str(exc))
+            log.warning("Desktop polling failed for group=%s: %s", group_id, exc)
+    if errors:
+        raise SourceError(errors[0])
+
+
+@asynccontextmanager
+async def reader_lifespan(app):
+    enabled = os.getenv("WECHAT_BOT_POLL") == "1"
+    reader_status.update(enabled=enabled, error=None)
+    stop = asyncio.Event()
+
+    async def worker():
+        while not stop.is_set():
+            try:
+                await asyncio.to_thread(poll_once)
+                reader_status["error"] = None
+            except Exception as exc:
+                error = str(exc) if isinstance(exc, SourceError) else type(exc).__name__
+                if reader_status["error"] != error:
+                    log.warning("Desktop polling unavailable: %s", error)
+                reader_status["error"] = error
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=5)
+            except TimeoutError:
+                pass
+
+    task = asyncio.create_task(worker()) if enabled else None
+    try:
+        yield
+    finally:
+        stop.set()
+        if task:
+            await task
+
+
+@router.get("/status")
+def status() -> dict:
+    return dict(reader_status)
 
 
 @router.get("/rules")

@@ -41,9 +41,9 @@ EDITABLE_KEYS = (
     "step_delay", "wait_timeout", "verify_timeout",
 )
 
-from server.reader import router as reader_router
+from server.reader import reader_lifespan, router as reader_router
 
-app = FastAPI(title="wechat-bot", version="0.1.0")
+app = FastAPI(title="wechat-bot", version="0.1.0", lifespan=reader_lifespan)
 app.include_router(reader_router)
 app.add_middleware(
     CORSMiddleware,

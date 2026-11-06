@@ -50,6 +50,9 @@ class Automation:
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(group_id, message_id)
                 );
+                CREATE TABLE IF NOT EXISTS reader_cursors (
+                    group_id TEXT PRIMARY KEY, message_id TEXT NOT NULL
+                );
             """)
             yield db
 
@@ -72,6 +75,18 @@ class Automation:
             return [dict(row) for row in db.execute(
                 "SELECT * FROM deliveries ORDER BY id DESC LIMIT 100"
             )]
+
+    def cursor(self, group_id: str) -> str | None:
+        with self.database() as db:
+            row = db.execute("SELECT message_id FROM reader_cursors WHERE group_id=?", (group_id,)).fetchone()
+            return row["message_id"] if row is not None else None
+
+    def save_cursor(self, group_id: str, message_id: str):
+        with self.database() as db:
+            db.execute(
+                "INSERT INTO reader_cursors VALUES (?, ?) ON CONFLICT(group_id) "
+                "DO UPDATE SET message_id=excluded.message_id", (group_id, message_id),
+            )
 
     def dispatch(self, event: MessageEvent) -> Literal["unmatched", "duplicate", "pending", "acknowledged", "failed"]:
         with self.database() as db:

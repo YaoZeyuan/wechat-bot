@@ -81,6 +81,6 @@ class CipherTalkCLI:
             "hasMore": len(groups) > limit or data.get("hasMore", False),
         }
 
-    def messages(self, session_id: str, *, limit=1, **filters) -> dict:
-        return self._run("messages", session_id, "--limit", str(limit))
+    def messages(self, session_id: str, *, limit=1, offset=0, **filters) -> dict:
+        return self._run("messages", session_id, "--limit", str(limit), "--offset", str(offset))
 
