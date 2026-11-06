@@ -41,7 +41,10 @@ EDITABLE_KEYS = (
     "step_delay", "wait_timeout", "verify_timeout",
 )
 
+from server.reader import router as reader_router
+
 app = FastAPI(title="wechat-bot", version="0.1.0")
+app.include_router(reader_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",

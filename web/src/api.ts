@@ -30,6 +30,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  probeReader: (payload: { query: string; port?: number; token?: string; session_id?: string }) =>
+    request<{ groups: { id: string; name: string }[]; has_more: boolean; message_readable: boolean | null }>('/reader/probe', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   health: () => request<HealthResponse>('/health'),
   devices: () => request<DevicesResponse>('/devices'),
   getConfig: () => request<AppConfig>('/config'),

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from './api'
+import ReaderSetup from './ReaderSetup.vue'
 import type { Device, HealthResponse, LogItem, Stats } from './types'
 
 const health = ref<HealthResponse | null>(null)
@@ -134,7 +135,7 @@ onMounted(async () => {
     <header class="topbar">
       <div>
         <h1>wechat-bot 控制台</h1>
-        <p class="sub">第一期 · 消息发送链路</p>
+        <p class="sub">电脑端消息读取与手机发送</p>
       </div>
       <div class="badges">
         <span class="badge" :class="apiOnline ? 'ok' : 'warn'">API {{ apiOnline ? '在线' : '离线' }}</span>
@@ -144,6 +145,8 @@ onMounted(async () => {
 
     <p v-if="error" class="message error">{{ error }}</p>
     <p v-if="notice" class="message ok">{{ notice }}</p>
+
+    <ReaderSetup />
 
     <div class="grid">
       <section class="card">
