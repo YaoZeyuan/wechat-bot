@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { api, type KeywordRule } from './api'
+import { readerGroups as groups, selectedReaderGroup as selected } from './readerSelection'
 
-const props = defineProps<{ groups: { id: string; name: string }[]; selected: string }>()
-const rule = ref<KeywordRule>({ group_id: '', keyword: '', handler: 'fixed_reply', url: null, enabled: true })
+const rule = ref<KeywordRule>({ group_id: selected.value, keyword: '', handler: 'fixed_reply', url: null, enabled: true })
 const rules = ref<KeywordRule[]>([])
 const handlers = ref<string[]>([])
 const deliveries = ref<Awaited<ReturnType<typeof api.readerDeliveries>>['items']>([])
@@ -17,7 +17,7 @@ const refreshError = ref('')
 let refreshTimer: number | undefined
 let refreshing = false
 
-watch(() => props.selected, (id) => { if (id) rule.value.group_id = id })
+watch(selected, (id) => { if (id) rule.value.group_id = id })
 
 async function load() {
   const [config, runs, status] = await Promise.all([api.readerRules(), api.readerDeliveries(), api.readerStatus()])
@@ -107,6 +107,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
 </script>
 
 <template>
+  <main class="page">
   <section class="card">
     <h2>关键词规则</h2>
     <form @submit.prevent="save">
@@ -128,12 +129,12 @@ onUnmounted(() => window.clearInterval(refreshTimer))
         <input v-model.trim="rule.url" type="url" required placeholder="http://127.0.0.1:9000/hook" />
       </label>
       <label class="check"><input v-model="rule.enabled" type="checkbox" />启用规则</label>
-      <button :disabled="busy || !handlers.length">保存规则</button>
+      <a-button type="primary" html-type="submit" :disabled="busy || !handlers.length">保存规则</a-button>
     </form>
     <label>试跑文本 <input v-model="sample" maxlength="4000" /></label>
-    <button type="button" :disabled="busy || !rule.group_id || !rule.keyword" @click="previewCurrentRule">试跑当前规则</button>
+    <a-button :disabled="busy || !rule.group_id || !rule.keyword" @click="previewCurrentRule">试跑当前规则</a-button>
     <template v-if="monitoring?.mock_enabled">
-      <button type="button" :disabled="busy || !rule.group_id || !sample.trim()" @click="submitMockMessage">投递模拟消息</button>
+      <a-button :disabled="busy || !rule.group_id || !sample.trim()" @click="submitMockMessage">投递模拟消息</a-button>
       <p>模拟投递使用已保存的规则，会调用匹配的 HTTP 回调并记录结果。</p>
     </template>
     <div v-if="preview" role="status">
@@ -146,20 +147,20 @@ onUnmounted(() => window.clearInterval(refreshTimer))
     <ul v-if="rules.length">
       <li v-for="item in rules" :key="JSON.stringify([item.group_id, item.keyword])">
         {{ item.group_id }} · {{ item.keyword }} · {{ item.handler }} · {{ item.enabled ? '启用' : '停用' }}
-        <button type="button" :disabled="busy" @click="rule = { ...item }">编辑</button>
+        <a-button :disabled="busy" @click="rule = { ...item }">编辑</a-button>
       </li>
     </ul>
   </section>
   <section class="card">
     <div class="card-head">
       <h2>规则执行和待发送记录</h2>
-      <button :disabled="busy" @click="run(load)">刷新</button>
+      <a-button :disabled="busy" @click="run(load)">刷新</a-button>
     </div>
     <div v-if="monitoring">
       <p>监听{{ monitoring.enabled ? '已启用' : '已停用' }}{{ monitoring.running ? ' · 正在读取' : '' }}</p>
       <p v-if="monitoring.last_success_at">最近成功读取 {{ new Date(monitoring.last_success_at).toLocaleString() }}</p>
       <p v-if="monitoring.error" class="message error" role="alert">{{ monitoring.error }}</p>
-      <button :disabled="busy" @click="toggleMonitoring">{{ monitoring.enabled ? '停止监听' : '启动监听' }}</button>
+      <a-button :disabled="busy" @click="toggleMonitoring">{{ monitoring.enabled ? '停止监听' : '启动监听' }}</a-button>
     </div>
     <p v-if="refreshError" class="message error" role="status">自动刷新失败：{{ refreshError }}</p>
     <p v-if="!deliveries.length">暂无执行记录。</p>
@@ -167,7 +168,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
       <li v-for="item in deliveries" :key="item.id">
         {{ item.created_at }} UTC · {{ item.group_id }} · {{ item.handler }} · {{ item.status }}
         <span v-if="item.error"> · {{ item.error }}</span>
-        <button v-if="item.status === 'failed'" :disabled="busy" @click="retry(item.id)">重试</button>
+        <a-button v-if="item.status === 'failed'" :disabled="busy" @click="retry(item.id)">重试</a-button>
         <details v-if="item.task">
           <summary>待发送任务</summary>
           <pre>{{ JSON.stringify(JSON.parse(item.task), null, 2) }}</pre>
@@ -175,4 +176,5 @@ onUnmounted(() => window.clearInterval(refreshTimer))
       </li>
     </ul>
   </section>
+  </main>
 </template>

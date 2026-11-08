@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { api } from './api'
-import ReaderRules from './ReaderRules.vue'
+import { readerGroups as groups, selectedReaderGroup as selected } from './readerSelection'
 
 const query = ref('')
 const mode = ref('manual')
@@ -12,8 +12,6 @@ const account = ref('')
 const databaseKey = ref('')
 const port = ref(5032)
 const token = ref('')
-const groups = ref<{ id: string; name: string }[]>([])
-const selected = ref('')
 const busy = ref(false)
 const notice = ref('')
 const error = ref('')
@@ -93,7 +91,6 @@ async function probe(checkMessages = false) {
 
 <template>
   <main class="page">
-  <RouterLink to="/">返回控制台</RouterLink>
   <section class="card">
     <h2>电脑端微信读取</h2>
     <p>先查找账号目录，再确认账号 ID 并提供数据库密钥。建议使用离线副本验证读取。</p>
@@ -110,15 +107,15 @@ async function probe(checkMessages = false) {
     </template>
     <template v-if="mode === 'manual'">
       <h3>1. 查找并确认账号</h3>
-      <button type="button" :disabled="busy" @click="discoverAccounts()">查找微信账号</button>
-      <button type="button" :disabled="busy" @click="discoverAccounts(true)">手动选择数据库目录…</button>
+      <a-button :disabled="busy" @click="discoverAccounts()">查找微信账号</a-button>
+      <a-button :disabled="busy" @click="discoverAccounts(true)">手动选择数据库目录…</a-button>
       <details>
         <summary>目录对话框无法打开时，输入路径</summary>
         <label>搜索目录<input v-model="searchDirectory" placeholder="留空搜索默认目录" /></label>
       </details>
       <ul v-if="candidates.length">
         <li v-for="candidate in candidates" :key="candidate.database_path">
-          <button type="button" @click="chooseAccount(candidate)">{{ candidate.account }}</button>
+          <a-button @click="chooseAccount(candidate)">{{ candidate.account }}</a-button>
           {{ candidate.database_path }}
         </li>
       </ul>
@@ -126,7 +123,7 @@ async function probe(checkMessages = false) {
       <label>微信账号 ID <input v-model="account" /></label>
       <h3>2. 提供数据库密钥</h3>
       <label>数据库密钥 <input v-model="databaseKey" type="password" autocomplete="off" /></label>
-      <button type="button" :disabled="busy" @click="extractKey">重启微信并获取密钥</button>
+      <a-button :disabled="busy" @click="extractKey">重启微信并获取密钥</a-button>
       <p>如果已有密钥，可直接填写。自动获取需启用后端提取开关。启动提取后，如微信提示登录，请在等待期间完成登录。</p>
       <p>这些字段只用于本次验证。后台监听使用本机设置或 MIYU_DB_PATH、MIYU_WXID、MIYU_KEY_HEX 环境变量。</p>
     </template>
@@ -135,7 +132,7 @@ async function probe(checkMessages = false) {
     <p v-if="notice" class="message ok" role="status">{{ notice }}</p>
     <form @submit.prevent="probe()">
       <label>群名 <input v-model="query" placeholder="输入群名以缩小范围" /></label>
-      <button :disabled="busy">测试连接并搜索群聊</button>
+      <a-button type="primary" html-type="submit" :loading="busy">测试连接并搜索群聊</a-button>
     </form>
     <template v-if="groups.length">
       <label>验证消息读取
@@ -144,9 +141,8 @@ async function probe(checkMessages = false) {
           <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }} · {{ group.id }}</option>
         </select>
       </label>
-      <button :disabled="busy || !selected" @click="probe(true)">验证所选群</button>
+      <a-button :disabled="busy || !selected" @click="probe(true)">验证所选群</a-button>
     </template>
   </section>
-  <ReaderRules :groups="groups" :selected="selected" />
   </main>
 </template>

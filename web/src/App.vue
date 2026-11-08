@@ -145,8 +145,6 @@ onMounted(async () => {
     <p v-if="error" class="message error">{{ error }}</p>
     <p v-if="notice" class="message ok">{{ notice }}</p>
 
-    <RouterLink to="/setup">微信读取与规则配置</RouterLink>
-
     <div class="grid">
       <section class="card">
         <h2>发送消息</h2>
