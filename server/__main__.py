@@ -9,8 +9,10 @@ from pathlib import Path
 
 def main():
     import uvicorn
+    from .logging_setup import configure_logging
 
-    uvicorn.run("server.main:app", host="127.0.0.1", port=8000)
+    configure_logging()
+    uvicorn.run("server.main:app", host="127.0.0.1", port=8000, log_config=None, access_log=False)
 
 
 def web_main():

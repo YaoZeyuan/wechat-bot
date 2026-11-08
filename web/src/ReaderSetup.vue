@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { api } from './api'
 import { readerGroups as groups, selectedReaderGroup as selected } from './readerSelection'
 
@@ -15,6 +15,20 @@ const token = ref('')
 const busy = ref(false)
 const notice = ref('')
 const error = ref('')
+const keyProgress = ref('')
+const keySteps = ref<{ stage: string; message: string }[]>([])
+
+onMounted(async () => {
+  try {
+    const profile = await api.readerProfile()
+    if (profile && !databasePath.value) {
+      databasePath.value = profile.database_path
+      account.value = profile.account
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  }
+})
 
 async function discoverAccounts(pick = false) {
   busy.value = true
@@ -51,17 +65,40 @@ async function extractKey() {
   busy.value = true
   error.value = ''
   notice.value = ''
+  keyProgress.value = '正在向后端发送请求…'
+  keySteps.value = []
+  let polling = false
+  const timer = window.setInterval(async () => {
+    if (polling) return
+    polling = true
+    try {
+      const progress = await api.readerKeyProgress()
+      if (progress.message) keyProgress.value = progress.message
+      keySteps.value = progress.steps
+    } catch {
+      // The extraction request itself reports connection failures.
+    } finally {
+      polling = false
+    }
+  }, 750)
   try {
     databaseKey.value = (await api.extractReaderKey()).key
     notice.value = '密钥已填入，请验证它是否对应所选数据库。'
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
+    window.clearInterval(timer)
+    try {
+      keySteps.value = (await api.readerKeyProgress()).steps
+    } catch {
+      // Keep the last reported steps if the backend disconnected.
+    }
+    keyProgress.value = ''
     busy.value = false
   }
 }
 
-async function probe(checkMessages = false) {
+async function probe(checkMessages = false, saveProfile = false) {
   busy.value = true
   notice.value = ''
   error.value = ''
@@ -73,6 +110,7 @@ async function probe(checkMessages = false) {
         database_path: databasePath.value.trim(),
         account: account.value.trim(),
         database_key: databaseKey.value.trim(),
+        save_profile: saveProfile,
       } : {}),
       ...(checkMessages ? { session_id: selected.value } : {}),
     })
@@ -81,6 +119,7 @@ async function probe(checkMessages = false) {
     notice.value = result.message_readable
       ? result.has_messages ? '已验证所选群的消息读取。' : '消息库查询成功，但所选群目前没有本地消息记录。'
       : `连接成功，找到 ${result.groups.length} 个群。${result.has_more ? '可输入群名缩小范围。' : ''}`
+    if (saveProfile) notice.value += ' 已保存本机配置。'
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -124,8 +163,13 @@ async function probe(checkMessages = false) {
       <h3>2. 提供数据库密钥</h3>
       <label>数据库密钥 <input v-model="databaseKey" type="password" autocomplete="off" /></label>
       <a-button :disabled="busy" @click="extractKey">重启微信并获取密钥</a-button>
+      <a-alert v-if="keyProgress" type="info">{{ keyProgress }}</a-alert>
+      <ol v-if="keySteps.length">
+        <li v-for="step in keySteps" :key="step.stage">{{ step.message }}</li>
+      </ol>
       <p>如果已有密钥，可直接填写。自动获取需启用后端提取开关。启动提取后，如微信提示登录，请在等待期间完成登录。</p>
-      <p>这些字段只用于本次验证。后台监听使用本机设置或 MIYU_DB_PATH、MIYU_WXID、MIYU_KEY_HEX 环境变量。</p>
+      <p>保存后，后台监听会使用本机配置。已保存账号再次验证时可以留空密钥。</p>
+      <a-button :disabled="busy || !databasePath.trim() || !account.trim()" @click="probe(false, true)">验证并保存配置</a-button>
     </template>
     <p v-if="busy" role="status">正在处理，请留意本机弹窗或微信登录提示…</p>
     <p v-if="error" class="message error" role="alert">{{ error }}</p>

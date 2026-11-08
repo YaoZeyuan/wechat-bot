@@ -1,12 +1,12 @@
 """Read new group messages in source order and checkpoint completed batches."""
 
-import logging
+import structlog
 
 from .automation import Automation
 from .ciphertalk import SourceError
 from .reply import MessageEvent
 
-log = logging.getLogger("uvicorn.error")
+log = structlog.get_logger("wechat_bot.polling")
 PAGE_SIZE = 50
 MAX_PAGES = 100
 
@@ -47,11 +47,12 @@ def page(source, group_id: str, offset: int, limit: int) -> list[dict]:
     return rows
 
 
-def poll_group(source, automation: Automation, group_id: str) -> int:
-    checkpoint = automation.cursor(group_id)
+def poll_group(source, automation: Automation, group_id: str, source_id: str = "") -> int:
+    cursor_key = f"{source_id}:{group_id}" if source_id else group_id
+    checkpoint = automation.cursor(cursor_key)
     if checkpoint is None:
         rows = page(source, group_id, 0, 1)
-        automation.save_cursor(group_id, message_id(rows[0]) if rows else "")
+        automation.save_cursor(cursor_key, message_id(rows[0]) if rows else "")
         return 0
 
     newer: dict[str, dict] = {}
@@ -71,9 +72,9 @@ def poll_group(source, automation: Automation, group_id: str) -> int:
     if not newer:
         return 0
     for identity, row in reversed(newer.items()):
-        event = incoming_text(group_id, row, identity)
+        event = incoming_text(group_id, row, f"{source_id}:{identity}" if source_id else identity)
         if event is not None:
             automation.dispatch(event)
-    automation.save_cursor(group_id, next(iter(newer)))
-    log.info("Desktop reader processed %d new messages", len(newer))
+    automation.save_cursor(cursor_key, next(iter(newer)))
+    log.info("desktop_messages_processed", count=len(newer))
     return len(newer)

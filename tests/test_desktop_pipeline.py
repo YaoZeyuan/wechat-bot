@@ -1,4 +1,5 @@
 import hashlib
+import json
 import tempfile
 import unittest
 from contextlib import closing
@@ -9,6 +10,7 @@ from sqlcipher3 import dbapi2
 from fastapi import HTTPException
 
 from server.automation import Automation, Rule
+from server import reader
 from server.polling import poll_group
 from server.reply import SendTask
 from server.reader import TaskResult, claim_task, finish_task, pending_tasks
@@ -16,6 +18,37 @@ from server.sqlcipher_reader import SqlCipherReader
 
 
 class DesktopPipelineTest(unittest.TestCase):
+    def test_local_reader_profile_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "local-data" / "reader-profile.json"
+            with patch.object(reader, "profile_path", path):
+                self.assertIsNone(reader.get_profile())
+                profile = reader.StoredReaderProfile(
+                    database_path=tmp, account="wxid_fixture", database_key="a" * 64,
+                )
+                reader.save_profile(profile)
+                self.assertEqual(json.loads(path.read_text())["database_key"], "a" * 64)
+                self.assertEqual(reader.load_profile(), profile)
+
+    def test_key_progress_retains_hook_success_after_completion(self):
+        with patch.object(reader, "key_progress", {}), patch.dict("os.environ", {"WECHAT_BOT_KEY_EXTRACTION": "1"}):
+            with patch.object(reader, "CipherTalkCLI") as factory:
+                tool = factory.return_value
+                tool.restart_wechat.return_value = 123
+
+                def extract(pid, report):
+                    self.assertEqual(pid, 123)
+                    report("dll_loaded", "loaded")
+                    report("hook_initialized", "initialized")
+                    return "a" * 64
+
+                tool.extract_with_progress.side_effect = extract
+                self.assertEqual(reader.extract_key(), {"key": "a" * 64})
+                progress = reader.get_key_progress()
+                self.assertEqual(progress["stage"], "complete")
+                self.assertIn("hook_initialized", [step["stage"] for step in progress["steps"]])
+                self.assertNotIn("a" * 64, json.dumps(progress))
+
     def test_encrypted_new_group_message_creates_one_task(self):
         key = bytes(range(32))
         group = "test@chatroom"

@@ -1,15 +1,18 @@
 """Desktop message-source setup endpoints."""
 
 import asyncio
-import logging
+import hashlib
+import json
 import os
 import subprocess
 import sys
+import structlog
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from threading import Lock
+from tempfile import NamedTemporaryFile
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, SecretStr
@@ -23,26 +26,47 @@ from .polling import incoming_text, message_id, poll_group
 from .reply import MessageEvent, SendTask
 
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
-log = logging.getLogger("uvicorn.error")
+log = structlog.get_logger("wechat_bot.reader")
 automation = Automation(Path(__file__).resolve().parent.parent / "automation.db")
 reader_status = {"enabled": False, "running": False, "error": None, "last_success_at": None}
 key_extraction_lock = Lock()
+key_progress = {"stage": "idle", "message": "", "steps": []}
+profile_path = Path(__file__).resolve().parent.parent / "local-data" / "reader-profile.json"
+
+
+def report_key_progress(stage: str, message: str):
+    steps = [] if stage == "preparing" else key_progress["steps"]
+    key_progress.update(stage=stage, message=message, steps=[*steps, {"stage": stage, "message": message}])
+    log.info("wechat_key_stage", stage=stage, message=message)
+
+
+@router.get("/key/progress")
+def get_key_progress() -> dict:
+    return dict(key_progress)
 
 
 def poll_once():
     groups = {rule.group_id for rule in automation.rules() if rule.enabled}
     if not groups:
         return False
-    source = SqlCipherReader.discover()
+    profile = load_profile()
+    source = (
+        SqlCipherReader(Path(profile.database_path), profile.database_key.get_secret_value(), profile.account)
+        if profile else SqlCipherReader.discover()
+    )
+    source_id = (
+        hashlib.sha256(f"{profile.account}\0{profile.database_path}".encode()).hexdigest()[:24]
+        if profile else ""
+    )
     errors = []
     for group_id in sorted(groups):
         if not reader_status["enabled"]:
             break
         try:
-            poll_group(source, automation, group_id)
+            poll_group(source, automation, group_id, source_id)
         except SourceError as exc:
             errors.append(str(exc))
-            log.warning("Desktop polling failed for group=%s: %s", group_id, exc)
+            log.warning("desktop_group_poll_failed", group_id=group_id, error=str(exc))
     if errors:
         raise SourceError(errors[0])
     return bool(reader_status["enabled"])
@@ -66,7 +90,7 @@ async def reader_lifespan(app):
                 except Exception as exc:
                     error = str(exc) if isinstance(exc, SourceError) else type(exc).__name__
                     if reader_status["error"] != error:
-                        log.warning("Desktop polling unavailable: %s", error)
+                        log.warning("desktop_poll_unavailable", error=error)
                     reader_status["error"] = error
                 finally:
                     reader_status["running"] = False
@@ -98,7 +122,7 @@ async def set_status(settings: MonitoringSettings) -> dict:
         raise HTTPException(409, "请先启用至少一条关键词规则")
     await asyncio.to_thread(automation.set_monitoring, settings.enabled)
     reader_status.update(enabled=settings.enabled, error=None)
-    log.info("Desktop polling enabled=%s", settings.enabled)
+    log.info("desktop_polling_changed", enabled=settings.enabled)
     return status()
 
 
@@ -190,7 +214,7 @@ def claim_task(delivery_id: int) -> PendingTask:
         if row is None:
             raise HTTPException(409, "任务已被领取或不可领取")
         task = SendTask.model_validate_json(row["task"])
-    log.info("Phone task claimed id=%s", delivery_id)
+    log.info("phone_task_claimed", delivery_id=delivery_id)
     return PendingTask(delivery_id=delivery_id, task=task)
 
 
@@ -207,7 +231,7 @@ def finish_task(delivery_id: int, result: TaskResult) -> TaskResult:
         ).rowcount
         if not changed:
             raise HTTPException(409, "任务未领取或已有不同执行结果")
-    log.info("Phone task result id=%s status=%s", delivery_id, result.status)
+    log.info("phone_task_result", delivery_id=delivery_id, status=result.status)
     return result
 
 
@@ -227,6 +251,52 @@ class SourceSettings(BaseModel):
     database_path: str | None = Field(default=None, max_length=1024)
     account: str = Field(default="", max_length=256)
     database_key: SecretStr = SecretStr("")
+    save_profile: bool = False
+
+
+class ReaderProfile(BaseModel):
+    database_path: str
+    account: str
+
+
+class StoredReaderProfile(ReaderProfile):
+    database_key: SecretStr
+
+
+def load_profile() -> StoredReaderProfile | None:
+    try:
+        return StoredReaderProfile.model_validate_json(profile_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        log.warning("reader_profile_load_failed")
+        raise SourceError("无法读取本机 reader-profile.json") from None
+
+
+@router.get("/profile", response_model=ReaderProfile | None)
+def get_profile():
+    try:
+        return load_profile()
+    except SourceError as exc:
+        raise HTTPException(500, str(exc)) from None
+
+
+def save_profile(profile: StoredReaderProfile):
+    temporary = None
+    try:
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile(dir=profile_path.parent, delete=False, mode="w", encoding="utf-8") as file:
+            temporary = Path(file.name)
+            data = profile.model_dump(exclude={"database_key"})
+            data["database_key"] = profile.database_key.get_secret_value()
+            file.write(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+        temporary.replace(profile_path)
+    except OSError:
+        log.warning("reader_profile_save_failed")
+        raise HTTPException(500, "连接验证通过，但无法保存本机配置") from None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 class AccountSearch(BaseModel):
@@ -261,11 +331,16 @@ def extract_key() -> dict:
     if not key_extraction_lock.acquire(blocking=False):
         raise HTTPException(409, "已经在获取密钥，请等待当前操作结束")
     try:
+        report_key_progress("preparing", "正在检查本地密钥工具和原生库")
         tool = CipherTalkCLI()
-        tool.restart_wechat()
-        return {"key": tool.extract_key()}
+        pid = tool.restart_wechat(report_key_progress)
+        report_key_progress("wechat_started", "微信已重新启动，正在加载密钥 DLL")
+        key = tool.extract_with_progress(pid, report_key_progress)
+        report_key_progress("complete", "已取得密钥，请验证数据库连接")
+        return {"key": key}
     except SourceError as exc:
-        log.warning("WeChat key extraction failed: %s", exc)
+        report_key_progress("failed", str(exc))
+        log.warning("wechat_key_extraction_failed", error=str(exc))
         raise HTTPException(502, str(exc)) from None
     finally:
         key_extraction_lock.release()
@@ -309,15 +384,21 @@ def find_accounts(settings: AccountSearch) -> dict:
 @router.post("/probe")
 def probe(settings: SourceSettings) -> dict:
     """Check a source without exposing its token or returning chat content."""
+    if settings.save_profile and not settings.database_path:
+        raise HTTPException(422, "请先选择数据库目录")
+    if settings.save_profile and (reader_status["enabled"] or reader_status["running"]):
+        raise HTTPException(409, "请先停止后台监听，再保存账号配置")
     try:
         if settings.database_path:
             if not settings.account:
                 raise HTTPException(422, "请填写微信账号 ID")
-            source = SqlCipherReader(
-                Path(settings.database_path).expanduser().resolve(),
-                settings.database_key.get_secret_value(),
-                settings.account,
-            )
+            path = Path(settings.database_path).expanduser().resolve()
+            key = settings.database_key.get_secret_value()
+            if not key:
+                profile = load_profile()
+                if profile and Path(profile.database_path) == path and profile.account == settings.account:
+                    key = profile.database_key.get_secret_value()
+            source = SqlCipherReader(path, key, settings.account)
         elif settings.port is None:
             source = SqlCipherReader.discover()
         else:
@@ -336,13 +417,17 @@ def probe(settings: SourceSettings) -> dict:
             messages = source.messages(settings.session_id, limit=1, includeRaw=False, includeMediaPaths=False)
             has_messages = bool(messages.get("items"))
             message_readable = True
+        if settings.save_profile:
+            save_profile(StoredReaderProfile(
+                database_path=str(source.root), account=settings.account, database_key=SecretStr(key),
+            ))
     except SourceError as exc:
-        log.warning("Desktop reader probe failed: %s", exc)
+        log.warning("desktop_probe_failed", error=str(exc))
         raise HTTPException(502, str(exc)) from None
     except (KeyError, TypeError):
         log.warning("Desktop reader received an unexpected CipherTalk response")
         raise HTTPException(502, "密语代理返回了不兼容的会话数据") from None
-    log.info("Desktop reader probe succeeded; groups=%d, message_readable=%s", len(groups), message_readable)
+    log.info("desktop_probe_succeeded", group_count=len(groups), message_readable=message_readable)
     return {
         "groups": groups, "has_more": bool(result.get("hasMore")),
         "message_readable": message_readable, "has_messages": has_messages,

@@ -193,3 +193,7 @@ uv run dev-sender --help
 ```
 
 前两个命令分别启动 API（8000）和 Web（3000）。发送器是按次执行的 CLI，例如 `uv run dev-sender --devices`。读取本地数据库无需开启 Mock。
+
+`dev-server` 在终端输出 JSON 日志。请求日志包含路由、状态码、耗时和请求 ID，可用响应头 `X-Request-ID` 定位对应请求。规则和手机任务按投递 ID 关联。
+
+在「微信初始化」页选择账号目录，填入密钥或按页面提示获取，然后点击「验证并保存配置」。目录、账号 ID 和数据库密钥会写入 `local-data/reader-profile.json`，该目录已加入 Git 忽略规则。后台监听优先使用保存的配置。切换账号前先停止监听。

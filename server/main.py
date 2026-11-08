@@ -12,12 +12,15 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from time import perf_counter
+from uuid import uuid4
+import structlog
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -45,6 +48,32 @@ from server.reader import reader_lifespan, router as reader_router
 
 app = FastAPI(title="wechat-bot", version="0.1.0", lifespan=reader_lifespan)
 app.include_router(reader_router)
+request_log = structlog.get_logger("wechat_bot.http")
+
+
+@app.middleware("http")
+async def log_api_request(request: Request, call_next):
+    started = perf_counter()
+    request_id = uuid4().hex
+    status = 500
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        route = request.scope.get("route")
+        request_log.log(
+            40 if status >= 500 else 20,
+            "http_request",
+            method=request.method,
+            route=getattr(route, "path", "<unmatched>"),
+            status=status,
+            duration_ms=round((perf_counter() - started) * 1000, 1),
+        )
+        structlog.contextvars.clear_contextvars()
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",

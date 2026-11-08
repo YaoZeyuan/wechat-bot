@@ -57,6 +57,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  readerKeyProgress: () => request<{ stage: string; message: string; steps: { stage: string; message: string }[] }>('/reader/key/progress'),
+  readerProfile: () => request<{ database_path: string; account: string } | null>('/reader/profile'),
   pickReaderDirectory: () =>
     request<{ directory: string }>('/reader/accounts/pick-directory', { method: 'POST', body: '{}' }),
   extractReaderKey: () => request<{ key: string }>('/reader/key/extract', { method: 'POST', body: '{}' }),
@@ -85,7 +87,7 @@ export const api = {
   readerDeliveries: () => request<{ items: Delivery[] }>('/reader/deliveries'),
   retryReaderDelivery: (id: number) =>
     request<{ status: string }>(`/reader/deliveries/${id}/retry`, { method: 'POST', body: '{}' }),
-  probeReader: (payload: { query: string; port?: number; token?: string; session_id?: string; database_path?: string; account?: string; database_key?: string }) =>
+  probeReader: (payload: { query: string; port?: number; token?: string; session_id?: string; database_path?: string; account?: string; database_key?: string; save_profile?: boolean }) =>
     request<{ groups: { id: string; name: string }[]; has_more: boolean; message_readable: boolean | null; has_messages: boolean | null }>('/reader/probe', {
       method: 'POST',
       body: JSON.stringify(payload),

@@ -1,6 +1,6 @@
 import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
-import { Button, Layout, Tabs, Tag } from '@arco-design/web-vue'
+import { Alert, Button, Layout, Tabs, Tag } from '@arco-design/web-vue'
 import '@arco-design/web-vue/dist/arco.css'
 import './style.css'
 import App from './App.vue'
@@ -17,4 +17,4 @@ const router = createRouter({
   ],
 })
 
-createApp(AdminLayout).use(router).use(Layout).use(Tabs).use(Tag).use(Button).mount('#app')
+createApp(AdminLayout).use(router).use(Layout).use(Tabs).use(Tag).use(Button).use(Alert).mount('#app')
