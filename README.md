@@ -46,7 +46,7 @@ flowchart LR
 | Node.js | 20.19+ 或 22.12+（Vite 8 的要求，验证用 22） |
 | 安卓手机 | 开启开发者选项与 USB 调试，微信已登录，保持解锁与屏幕常亮 |
 | adb | Android SDK `platform-tools`，需在 PATH 中或写入配置 |
-| 操作系统 | Windows 实测；adb 与 uiautomator2 跨平台，其他系统把 `.venv/Scripts/python.exe` 换成 `.venv/bin/python` |
+| 操作系统 | Windows 实测，其他平台可使用相同的 uv 启动命令 |
 
 ## 快速开始
 
@@ -54,8 +54,7 @@ flowchart LR
 git clone https://github.com/YaoZeyuan/wechat-bot.git
 cd wechat-bot
 
-python -m venv .venv
-.venv/Scripts/python.exe -m pip install -r requirements.txt
+uv sync
 
 cd web
 npm install
@@ -65,7 +64,7 @@ cd ..
 首次运行会自动从 `config.example.json` 生成一份本机私有的 `config.json`（默认是「文件传输助手 + 演练模式」，不会真的发消息）：
 
 ```bash
-.venv/Scripts/python.exe check_env.py
+uv run python check_env.py
 ```
 
 它会打印 Python / adb / 设备 / 微信安装状态，以及手机端准备清单。手机准备好后：
@@ -74,23 +73,23 @@ cd ..
 2. 先演练，确认文本正确填入了目标会话的输入框：
 
    ```bash
-   .venv/Scripts/python.exe send.py --text "发送链路测试" --dry-run
+   uv run dev-sender --text "发送链路测试" --dry-run
    ```
 
 3. 确认无误后再实际发送：
 
    ```bash
-   .venv/Scripts/python.exe send.py --text "发送链路测试" --to "某群名"
+   uv run dev-sender --text "发送链路测试" --to "某群名"
    ```
 
 启动 Web 控制台（两个终端）：
 
 ```bash
 # 终端 1：API 服务，监听 127.0.0.1:8000
-.venv/Scripts/python.exe -m uvicorn server.main:app --host 127.0.0.1 --port 8000
+uv run dev-server
 
 # 终端 2：前端，默认 http://127.0.0.1:3000
-cd web && npm run dev
+uv run dev-web
 ```
 
 前端通过 Vite 代理把 `/api` 转发到 8000。Windows 上 `5101–5200` 可能被系统保留为动态端口（Hyper-V / WSL），所以前端默认用 3000；如被占用改 `web/vite.config.ts` 的 `port`。
@@ -120,12 +119,12 @@ cd web && npm run dev
 ### 命令行
 
 ```bash
-.venv/Scripts/python.exe send.py --text "内容"                 # 发到默认目标
-.venv/Scripts/python.exe send.py --to "某群名" --text "内容"   # 指定会话
-.venv/Scripts/python.exe send.py --text "内容" --dry-run        # 只演练
-.venv/Scripts/python.exe send.py --file rank.txt               # 从 UTF-8 文件读多行文本
-.venv/Scripts/python.exe send.py --devices                     # 列出 adb 设备
-.venv/Scripts/python.exe send.py --dump                        # 导出当前界面层级，用于调选择器
+uv run dev-sender --text "内容"                 # 发到默认目标
+uv run dev-sender --to "某群名" --text "内容"   # 指定会话
+uv run dev-sender --text "内容" --dry-run        # 只演练
+uv run dev-sender --file rank.txt               # 从 UTF-8 文件读多行文本
+uv run dev-sender --devices                     # 列出 adb 设备
+uv run dev-sender --dump                        # 导出当前界面层级，用于调选择器
 ```
 
 `--dry-run` 和失败时会在 `debug/` 保存截图与界面层级 XML，方便排查。
@@ -182,3 +181,15 @@ cd web && npm run dev
 ## 许可证
 
 MIT，详见 [LICENSE](LICENSE)。
+
+## 根目录开发命令
+
+安装 uv 和带 npm 的 Node.js 后，分别在终端运行：
+
+```sh
+uv run dev-server
+uv run dev-web
+uv run dev-sender --help
+```
+
+前两个命令分别启动 API（8000）和 Web（3000）。发送器是按次执行的 CLI，例如 `uv run dev-sender --devices`。读取本地数据库无需开启 Mock。
