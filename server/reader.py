@@ -42,7 +42,7 @@ def report_key_progress(stage: str, message: str):
 
 @router.get("/key/progress")
 def get_key_progress() -> dict:
-    return dict(key_progress)
+    return {**key_progress, "enabled": os.getenv("WECHAT_BOT_KEY_EXTRACTION") == "1"}
 
 
 def poll_once():
@@ -327,6 +327,7 @@ def pick_directory() -> dict:
 @router.post("/key/extract")
 def extract_key() -> dict:
     if os.getenv("WECHAT_BOT_KEY_EXTRACTION") != "1":
+        log.warning("wechat_key_extraction_disabled")
         raise HTTPException(403, "未启用从微信进程获取密钥，请手动提供已有密钥")
     if not key_extraction_lock.acquire(blocking=False):
         raise HTTPException(409, "已经在获取密钥，请等待当前操作结束")

@@ -57,7 +57,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  readerKeyProgress: () => request<{ stage: string; message: string; steps: { stage: string; message: string }[] }>('/reader/key/progress'),
+  readerKeyProgress: () => request<{ enabled: boolean; stage: string; message: string; steps: { stage: string; message: string }[] }>('/reader/key/progress'),
   readerProfile: () => request<{ database_path: string; account: string } | null>('/reader/profile'),
   pickReaderDirectory: () =>
     request<{ directory: string }>('/reader/accounts/pick-directory', { method: 'POST', body: '{}' }),

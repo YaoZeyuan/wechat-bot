@@ -16,7 +16,20 @@ const busy = ref(false)
 const notice = ref('')
 const error = ref('')
 const keyProgress = ref('')
+const keyError = ref('')
+const keyEnabled = ref<boolean>()
+const confirmRestart = ref(false)
 const keySteps = ref<{ stage: string; message: string }[]>([])
+
+onMounted(async () => {
+  try {
+    const progress = await api.readerKeyProgress()
+    keyEnabled.value = progress.enabled
+    keySteps.value = progress.steps
+  } catch (err) {
+    keyError.value = err instanceof Error ? err.message : String(err)
+  }
+})
 
 onMounted(async () => {
   try {
@@ -61,9 +74,10 @@ function chooseAccount(candidate: (typeof candidates.value)[number]) {
 }
 
 async function extractKey() {
-  if (!window.confirm('后端将关闭并重新启动微信，然后获取密钥。微信重新打开后，请登录要读取的账号。确认继续？')) return
+  confirmRestart.value = false
   busy.value = true
   error.value = ''
+  keyError.value = ''
   notice.value = ''
   keyProgress.value = '正在向后端发送请求…'
   keySteps.value = []
@@ -85,7 +99,7 @@ async function extractKey() {
     databaseKey.value = (await api.extractReaderKey()).key
     notice.value = '密钥已填入，请验证它是否对应所选数据库。'
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    keyError.value = err instanceof Error ? err.message : String(err)
   } finally {
     window.clearInterval(timer)
     try {
@@ -162,7 +176,16 @@ async function probe(checkMessages = false, saveProfile = false) {
       <label>微信账号 ID <input v-model="account" /></label>
       <h3>2. 提供数据库密钥</h3>
       <label>数据库密钥 <input v-model="databaseKey" type="password" autocomplete="off" /></label>
-      <a-button :disabled="busy" @click="extractKey">重启微信并获取密钥</a-button>
+      <a-alert v-if="keyEnabled === false" type="warning">
+        后端未开启自动取钥。停止旧后端，在 PowerShell 执行以下两行，再刷新页面：
+        <pre>$env:WECHAT_BOT_KEY_EXTRACTION = '1'
+uv run dev-server</pre>
+      </a-alert>
+      <a-button :disabled="busy || keyEnabled !== true" @click="confirmRestart = true">重启微信并获取密钥</a-button>
+      <a-modal v-model:visible="confirmRestart" title="重启微信并获取密钥" ok-text="确认重启" @ok="extractKey">
+        后端将关闭并重新启动微信。微信重新打开后，请登录要读取的账号。
+      </a-modal>
+      <a-alert v-if="keyError" type="error">{{ keyError }}</a-alert>
       <a-alert v-if="keyProgress" type="info">{{ keyProgress }}</a-alert>
       <ol v-if="keySteps.length">
         <li v-for="step in keySteps" :key="step.stage">{{ step.message }}</li>
