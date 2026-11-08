@@ -10,6 +10,8 @@ const candidates = ref<Awaited<ReturnType<typeof api.findReaderAccounts>>['items
 const databasePath = ref('')
 const account = ref('')
 const databaseKey = ref('')
+const imageXorKey = ref('')
+const imageAesKey = ref('')
 const port = ref(5032)
 const token = ref('')
 const busy = ref(false)
@@ -33,7 +35,7 @@ onMounted(async () => {
 
 onMounted(async () => {
   try {
-    const profile = await api.readerProfile()
+    const profile = await api.readerAccountSelection()
     if (profile && !databasePath.value) {
       databasePath.value = profile.database_path
       account.value = profile.account
@@ -65,12 +67,43 @@ async function discoverAccounts(pick = false) {
   }
 }
 
+async function rememberAccount() {
+  busy.value = true
+  error.value = ''
+  try {
+    await api.saveReaderAccountSelection(databasePath.value.trim(), account.value.trim())
+    notice.value = '已记住所选账号和目录。'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    busy.value = false
+  }
+}
+
 function chooseAccount(candidate: (typeof candidates.value)[number]) {
   databasePath.value = candidate.database_path
   account.value = candidate.account
   databaseKey.value = ''
+  imageXorKey.value = ''
+  imageAesKey.value = ''
   groups.value = []
   selected.value = ''
+  void rememberAccount()
+}
+
+async function importImageKeys() {
+  busy.value = true
+  error.value = ''
+  try {
+    const keys = await api.importReaderImageKeys(databasePath.value.trim(), account.value.trim())
+    imageXorKey.value = keys.image_xor_key
+    imageAesKey.value = keys.image_aes_key
+    notice.value = '已填入该账号的图片密钥，验证并保存配置后写入本机。'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    busy.value = false
+  }
 }
 
 async function extractKey() {
@@ -124,6 +157,8 @@ async function probe(checkMessages = false, saveProfile = false) {
         database_path: databasePath.value.trim(),
         account: account.value.trim(),
         database_key: databaseKey.value.trim(),
+        image_xor_key: imageXorKey.value.trim(),
+        image_aes_key: imageAesKey.value.trim(),
         save_profile: saveProfile,
       } : {}),
       ...(checkMessages ? { session_id: selected.value } : {}),
@@ -174,6 +209,7 @@ async function probe(checkMessages = false, saveProfile = false) {
       </ul>
       <label>数据库目录 <input v-model="databasePath" placeholder="账号目录或 db_storage" /></label>
       <label>微信账号 ID <input v-model="account" /></label>
+      <a-button :disabled="busy || !databasePath.trim() || !account.trim()" @click="rememberAccount">记住账号和目录</a-button>
       <h3>2. 提供数据库密钥</h3>
       <label>数据库密钥 <input v-model="databaseKey" type="password" autocomplete="off" /></label>
       <a-alert v-if="keyEnabled === false" type="warning">
@@ -192,6 +228,11 @@ uv run dev-server</pre>
       </ol>
       <p>如果已有密钥，可直接填写。自动获取需启用后端提取开关。启动提取后，如微信提示登录，请在等待期间完成登录。</p>
       <p>保存后，后台监听会使用本机配置。已保存账号再次验证时可以留空密钥。</p>
+      <h3>3. 图片解密密钥（可选）</h3>
+      <label>图片 XOR 密钥 <input v-model="imageXorKey" type="password" autocomplete="off" /></label>
+      <label>图片 AES 密钥 <input v-model="imageAesKey" type="password" autocomplete="off" /></label>
+      <a-button :disabled="busy || !account.trim()" @click="importImageKeys">从本机密语配置导入</a-button>
+      <p>已有密钥可填写或导入。此步骤保存配置，图片解密和自动扫描尚未接入。</p>
       <a-button :disabled="busy || !databasePath.trim() || !account.trim()" @click="probe(false, true)">验证并保存配置</a-button>
     </template>
     <p v-if="busy" role="status">正在处理，请留意本机弹窗或微信登录提示…</p>

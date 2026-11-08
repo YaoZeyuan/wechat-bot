@@ -24,6 +24,8 @@ MESSAGES = {
     "desktop_probe_failed": "微信数据库连接验证失败",
     "desktop_probe_invalid_response": "读取端返回了不兼容的数据",
     "desktop_probe_succeeded": "微信数据库连接验证通过",
+    "image_key_import_failed": "读取本机图片密钥配置失败",
+    "image_key_import_succeeded": "已导入所选账号的图片密钥",
     "webhook_delivery_succeeded": "HTTP 回调成功",
     "webhook_delivery_failed": "HTTP 回调失败",
 }

@@ -4,10 +4,11 @@ import asyncio
 import hashlib
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import structlog
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -251,6 +252,8 @@ class SourceSettings(BaseModel):
     database_path: str | None = Field(default=None, max_length=1024)
     account: str = Field(default="", max_length=256)
     database_key: SecretStr = SecretStr("")
+    image_xor_key: SecretStr = SecretStr("")
+    image_aes_key: SecretStr = SecretStr("")
     save_profile: bool = False
 
 
@@ -261,6 +264,8 @@ class ReaderProfile(BaseModel):
 
 class StoredReaderProfile(ReaderProfile):
     database_key: SecretStr
+    image_xor_key: SecretStr = SecretStr("")
+    image_aes_key: SecretStr = SecretStr("")
 
 
 def load_profile() -> StoredReaderProfile | None:
@@ -281,22 +286,75 @@ def get_profile():
         raise HTTPException(500, str(exc)) from None
 
 
-def save_profile(profile: StoredReaderProfile):
+def save_local_json(path: Path, data: dict):
     temporary = None
     try:
-        profile_path.parent.mkdir(parents=True, exist_ok=True)
-        with NamedTemporaryFile(dir=profile_path.parent, delete=False, mode="w", encoding="utf-8") as file:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile(dir=path.parent, delete=False, mode="w", encoding="utf-8") as file:
             temporary = Path(file.name)
-            data = profile.model_dump(exclude={"database_key"})
-            data["database_key"] = profile.database_key.get_secret_value()
             file.write(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
-        temporary.replace(profile_path)
+        temporary.replace(path)
     except OSError:
         log.warning("reader_profile_save_failed")
-        raise HTTPException(500, "连接验证通过，但无法保存本机配置") from None
+        raise HTTPException(500, "无法保存本机配置") from None
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def save_profile(profile: StoredReaderProfile):
+    secrets = ("database_key", "image_xor_key", "image_aes_key")
+    data = profile.model_dump(exclude=set(secrets))
+    data.update({field: getattr(profile, field).get_secret_value() for field in secrets})
+    save_local_json(profile_path, data)
+
+
+@router.get("/account-selection", response_model=ReaderProfile | None)
+def get_account_selection():
+    path = profile_path.with_name("account-selection.json")
+    try:
+        return ReaderProfile.model_validate_json(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return get_profile()
+    except (OSError, ValueError):
+        raise HTTPException(500, "无法读取已选择的账号") from None
+
+
+@router.put("/account-selection")
+def save_account_selection(selection: ReaderProfile) -> ReaderProfile:
+    if not selection.database_path.strip() or not selection.account.strip():
+        raise HTTPException(422, "请填写数据库目录和账号 ID")
+    save_local_json(profile_path.with_name("account-selection.json"), selection.model_dump())
+    return selection
+
+
+@router.post("/image-keys/import")
+def import_image_keys(selection: ReaderProfile) -> dict:
+    appdata = os.getenv("APPDATA")
+    if not appdata:
+        raise HTTPException(404, "未找到本机密语配置")
+    path = Path(appdata) / "CipherTalk" / "ciphertalk-config.db"
+    if not path.is_file():
+        raise HTTPException(404, "未找到本机密语配置")
+    try:
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
+            values = {key: json.loads(value) for key, value in db.execute(
+                "SELECT key,value FROM config WHERE key IN ('accounts','myWxid','imageXorKey','imageAesKey')"
+            )}
+        accounts = values.get("accounts") or []
+        matches = [item for item in accounts if item.get("wxid") == selection.account]
+        if len(matches) > 1:
+            raise HTTPException(409, "密语中有多条同账号配置，请手动填写图片密钥")
+        account = matches[0] if matches else values if values.get("myWxid") == selection.account else {}
+        xor_key = str(account.get("imageXorKey") or "")
+        aes_key = str(account.get("imageAesKey") or "")
+    except (sqlite3.Error, ValueError, TypeError, AttributeError):
+        log.warning("image_key_import_failed")
+        raise HTTPException(502, "无法读取本机密语图片密钥配置") from None
+    if not xor_key and not aes_key:
+        raise HTTPException(404, "密语未保存此账号的图片密钥")
+    log.info("image_key_import_succeeded")
+    return {"image_xor_key": xor_key, "image_aes_key": aes_key}
 
 
 class AccountSearch(BaseModel):
@@ -419,9 +477,14 @@ def probe(settings: SourceSettings) -> dict:
             has_messages = bool(messages.get("items"))
             message_readable = True
         if settings.save_profile:
+            previous = load_profile()
+            same_account = previous and previous.account == settings.account and Path(previous.database_path) == source.root
             save_profile(StoredReaderProfile(
                 database_path=str(source.root), account=settings.account, database_key=SecretStr(key),
+                image_xor_key=settings.image_xor_key if settings.image_xor_key.get_secret_value() or not same_account else previous.image_xor_key,
+                image_aes_key=settings.image_aes_key if settings.image_aes_key.get_secret_value() or not same_account else previous.image_aes_key,
             ))
+            save_account_selection(ReaderProfile(database_path=str(source.root), account=settings.account))
     except SourceError as exc:
         log.warning("desktop_probe_failed", error=str(exc))
         raise HTTPException(502, str(exc)) from None

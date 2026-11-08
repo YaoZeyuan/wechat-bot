@@ -196,4 +196,10 @@ uv run dev-sender --help
 
 `dev-server` 在终端和 `local-data/logs/server.log` 同时输出 JSON 日志。常见日志的 `msg` 为中文，`event` 保留原始事件。日志单个文件约 5 MiB，最多保留 3 个历史文件。请求日志包含路由、状态码、耗时和请求 ID，可用响应头 `X-Request-ID` 定位对应请求。规则和手机任务按投递 ID 关联。
 
-在「微信初始化」页选择账号目录，填入密钥或按页面提示获取，然后点击「验证并保存配置」。目录、账号 ID 和数据库密钥会写入 `local-data/reader-profile.json`，该目录已加入 Git 忽略规则。后台监听优先使用保存的配置。切换账号前先停止监听。
+在「微信初始化」页选择账号目录，选择结果会写入 `local-data/account-selection.json`，下次打开自动回填。填入数据库密钥后点击「验证并保存配置」，将目录、账号 ID、数据库密钥及可选的图片 XOR/AES 密钥写入 `local-data/reader-profile.json`。图片密钥可手动填入，也可按账号从已有密语配置导入。整个 `local-data/` 已由 Git 忽略。后台监听优先使用验证过的配置，切换账号前先停止监听。
+
+已有一致的离线数据库副本及对应密钥时，可导出一个群的文本消息。命令需要明确指定副本路径，未保存该账号密钥时会交互询问。
+
+```sh
+uv run python -m server.export_history --snapshot local-data/snapshot --account wxid_example --group "群名" --output local-data/history.jsonl
+```

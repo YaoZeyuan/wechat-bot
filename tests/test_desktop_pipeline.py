@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from server.automation import Automation, Rule
 from server import reader
+from server import export_history
 from server.polling import poll_group
 from server.reply import SendTask
 from server.reader import TaskResult, claim_task, finish_task, pending_tasks
@@ -23,11 +24,16 @@ class DesktopPipelineTest(unittest.TestCase):
             path = Path(tmp) / "local-data" / "reader-profile.json"
             with patch.object(reader, "profile_path", path):
                 self.assertIsNone(reader.get_profile())
+                selection = reader.ReaderProfile(database_path=tmp, account="wxid_fixture")
+                reader.save_account_selection(selection)
+                self.assertEqual(reader.get_account_selection(), selection)
+                self.assertIsNone(reader.load_profile())
                 profile = reader.StoredReaderProfile(
-                    database_path=tmp, account="wxid_fixture", database_key="a" * 64,
+                    database_path=tmp, account="wxid_fixture", database_key="a" * 64, image_xor_key="0x23",
                 )
                 reader.save_profile(profile)
                 self.assertEqual(json.loads(path.read_text())["database_key"], "a" * 64)
+                self.assertEqual(json.loads(path.read_text())["image_xor_key"], "0x23")
                 self.assertEqual(reader.load_profile(), profile)
 
     def test_key_progress_retains_hook_success_after_completion(self):
@@ -105,6 +111,22 @@ class DesktopPipelineTest(unittest.TestCase):
                     result = TaskResult(status="sent")
                     self.assertEqual(finish_task(delivery_id, result), result)
                     self.assertEqual(finish_task(delivery_id, result), result)
+            contact_dir = root / "contact"
+            contact_dir.mkdir()
+            with closing(dbapi2.connect(contact_dir / "contact.db")) as db:
+                db.execute(f"""PRAGMA key = "x'{raw_key}'" """)
+                db.execute("CREATE TABLE contact(username TEXT, remark TEXT, nick_name TEXT)")
+                db.execute("INSERT INTO contact VALUES (?, '', 'fixture group')", (group,))
+                db.commit()
+            output = root / "history.jsonl"
+            argv = ["export_history", "--snapshot", tmp, "--account", "self",
+                    "--group", "fixture group", "--output", str(output)]
+            with patch("sys.argv", argv), patch.object(export_history, "load_profile", return_value=None):
+                with patch("getpass.getpass", return_value=key.hex()):
+                    export_history.main()
+            rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 3)
+            self.assertTrue(all(row["text"] == "测试" for row in rows))
 
 
 if __name__ == "__main__":

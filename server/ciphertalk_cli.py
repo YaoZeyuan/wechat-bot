@@ -118,13 +118,23 @@ class CipherTalkCLI:
         """
         close = """
             $ErrorActionPreference = 'Stop'
+            $session = (Get-Process -Id $PID).SessionId
             $processes = @(Get-Process -Name Weixin -ErrorAction SilentlyContinue |
-                Where-Object { $_.Path -eq $env:WECHAT_BOT_RESTART_EXE })
-            if ($processes.Count) {
-                $processes | Stop-Process -Force
-                $processes | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+                Where-Object { $_.SessionId -eq $session -and $_.Path -eq $env:WECHAT_BOT_RESTART_EXE })
+            foreach ($process in $processes) {
+                try { Stop-Process -Id $process.Id -Force -ErrorAction Stop }
+                catch {
+                    if (Get-Process -Id $process.Id -ErrorAction SilentlyContinue) { exit 5 }
+                }
             }
-            if (Get-Process -Name Weixin -ErrorAction SilentlyContinue) { exit 4 }
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+                $remaining = @(Get-Process -Name Weixin -ErrorAction SilentlyContinue |
+                    Where-Object { $_.SessionId -eq $session })
+                if (!$remaining.Count) { exit 0 }
+                Start-Sleep -Milliseconds 250
+            }
+            [Console]::WriteLine(($remaining.Id -join ','))
+            exit 4
         """
         launch = """
             $ErrorActionPreference = 'Stop'
@@ -160,8 +170,14 @@ class CipherTalkCLI:
         if not executable or not Path(executable).is_file():
             raise SourceError("微信安装路径不可读。请以启动微信的同一 Windows 用户运行后端。")
         progress("closing", "已识别微信，正在关闭当前进程")
-        if run(close, WECHAT_BOT_RESTART_EXE=executable).returncode:
-            raise SourceError("微信未完全退出。请检查任务管理器中的微信进程和权限，再重试。")
+        closed = run(close, WECHAT_BOT_RESTART_EXE=executable)
+        if closed.returncode == 4:
+            pids = closed.stdout.decode("ascii", errors="ignore").strip()
+            raise SourceError(f"等待 10 秒后仍检测到微信进程（PID：{pids}）。请关闭这些进程后再试。")
+        if closed.returncode == 5:
+            raise SourceError("无法结束仍在运行的微信进程。请确认后端与微信使用相同的权限级别。")
+        if closed.returncode:
+            raise SourceError(f"微信退出检查脚本失败（退出码 {closed.returncode}）。")
         progress("starting", "微信已退出，正在重新启动")
         started = run(launch, WECHAT_BOT_RESTART_EXE=executable)
         if started.returncode or not started.stdout.strip().isdigit():
