@@ -3,10 +3,13 @@
 import asyncio
 import logging
 import os
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
+from threading import Lock
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, SecretStr
@@ -23,6 +26,7 @@ router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
 log = logging.getLogger("uvicorn.error")
 automation = Automation(Path(__file__).resolve().parent.parent / "automation.db")
 reader_status = {"enabled": False, "running": False, "error": None, "last_success_at": None}
+key_extraction_lock = Lock()
 
 
 def poll_once():
@@ -229,15 +233,42 @@ class AccountSearch(BaseModel):
     directory: str = Field(default="", max_length=1024)
 
 
+@router.post("/accounts/pick-directory")
+def pick_directory() -> dict:
+    script = (
+        "import tkinter as tk; from tkinter import filedialog; "
+        "root=tk.Tk(); root.withdraw(); root.attributes('-topmost', True); "
+        "print(filedialog.askdirectory(parent=root, title='Choose WeChat data folder', mustexist=True)); "
+        "root.destroy()"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-X", "utf8", "-c", script],
+            capture_output=True, encoding="utf-8", timeout=180, check=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(408, "目录选择超时，请重新打开选择窗口") from None
+    except (OSError, subprocess.CalledProcessError):
+        raise HTTPException(503, "无法打开本机目录选择窗口，可使用自动查找或展开手动输入") from None
+    return {"directory": result.stdout.strip()}
+
+
 @router.post("/key/extract")
 def extract_key() -> dict:
     if os.getenv("WECHAT_BOT_KEY_EXTRACTION") != "1":
         raise HTTPException(403, "未启用从微信进程获取密钥，请手动提供已有密钥")
+    if not key_extraction_lock.acquire(blocking=False):
+        raise HTTPException(409, "已经在获取密钥，请等待当前操作结束")
     try:
-        return {"key": CipherTalkCLI().extract_key()}
+        tool = CipherTalkCLI()
+        tool.restart_wechat()
+        return {"key": tool.extract_key()}
     except SourceError as exc:
         log.warning("WeChat key extraction failed: %s", exc)
         raise HTTPException(502, str(exc)) from None
+    finally:
+        key_extraction_lock.release()
 
 
 @router.post("/accounts")

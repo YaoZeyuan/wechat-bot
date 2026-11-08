@@ -18,12 +18,17 @@ const busy = ref(false)
 const notice = ref('')
 const error = ref('')
 
-async function discoverAccounts() {
+async function discoverAccounts(pick = false) {
   busy.value = true
   error.value = ''
   notice.value = ''
-  candidates.value = []
   try {
+    if (pick) {
+      const { directory } = await api.pickReaderDirectory()
+      if (!directory) return
+      searchDirectory.value = directory
+    }
+    candidates.value = []
     candidates.value = (await api.findReaderAccounts(searchDirectory.value.trim())).items
     notice.value = candidates.value.length
       ? '请选择账号，并核对填入的账号 ID。'
@@ -44,7 +49,7 @@ function chooseAccount(candidate: (typeof candidates.value)[number]) {
 }
 
 async function extractKey() {
-  if (!window.confirm('此操作会向正在运行的微信进程安装 Hook。此前账号曾被锁定。确认继续？')) return
+  if (!window.confirm('后端将关闭并重新启动微信，然后获取密钥。微信重新打开后，请登录要读取的账号。确认继续？')) return
   busy.value = true
   error.value = ''
   notice.value = ''
@@ -87,6 +92,8 @@ async function probe(checkMessages = false) {
 </script>
 
 <template>
+  <main class="page">
+  <RouterLink to="/">返回控制台</RouterLink>
   <section class="card">
     <h2>电脑端微信读取</h2>
     <p>先查找账号目录，再确认账号 ID 并提供数据库密钥。建议使用离线副本验证读取。</p>
@@ -102,8 +109,13 @@ async function probe(checkMessages = false) {
       <label>访问令牌 <input v-model="token" type="password" autocomplete="off" /></label>
     </template>
     <template v-if="mode === 'manual'">
-      <label>搜索目录（可选）<input v-model="searchDirectory" placeholder="留空搜索默认目录，或填入微信存储位置" /></label>
-      <button type="button" :disabled="busy" @click="discoverAccounts">查找微信账号</button>
+      <h3>1. 查找并确认账号</h3>
+      <button type="button" :disabled="busy" @click="discoverAccounts()">查找微信账号</button>
+      <button type="button" :disabled="busy" @click="discoverAccounts(true)">手动选择数据库目录…</button>
+      <details>
+        <summary>目录对话框无法打开时，输入路径</summary>
+        <label>搜索目录<input v-model="searchDirectory" placeholder="留空搜索默认目录" /></label>
+      </details>
       <ul v-if="candidates.length">
         <li v-for="candidate in candidates" :key="candidate.database_path">
           <button type="button" @click="chooseAccount(candidate)">{{ candidate.account }}</button>
@@ -112,11 +124,15 @@ async function probe(checkMessages = false) {
       </ul>
       <label>数据库目录 <input v-model="databasePath" placeholder="账号目录或 db_storage" /></label>
       <label>微信账号 ID <input v-model="account" /></label>
+      <h3>2. 提供数据库密钥</h3>
       <label>数据库密钥 <input v-model="databaseKey" type="password" autocomplete="off" /></label>
-      <button type="button" :disabled="busy" @click="extractKey">从运行中的微信获取密钥</button>
-      <p>此功能需先在后端设置 WECHAT_BOT_KEY_EXTRACTION=1，并准备本地源码 CLI 和 wx_key.dll。</p>
+      <button type="button" :disabled="busy" @click="extractKey">重启微信并获取密钥</button>
+      <p>如果已有密钥，可直接填写。自动获取需启用后端提取开关。启动提取后，如微信提示登录，请在等待期间完成登录。</p>
       <p>这些字段只用于本次验证。后台监听使用本机设置或 MIYU_DB_PATH、MIYU_WXID、MIYU_KEY_HEX 环境变量。</p>
     </template>
+    <p v-if="busy" role="status">正在处理，请留意本机弹窗或微信登录提示…</p>
+    <p v-if="error" class="message error" role="alert">{{ error }}</p>
+    <p v-if="notice" class="message ok" role="status">{{ notice }}</p>
     <form @submit.prevent="probe()">
       <label>群名 <input v-model="query" placeholder="输入群名以缩小范围" /></label>
       <button :disabled="busy">测试连接并搜索群聊</button>
@@ -130,8 +146,7 @@ async function probe(checkMessages = false) {
       </label>
       <button :disabled="busy || !selected" @click="probe(true)">验证所选群</button>
     </template>
-    <p v-if="error" class="message error" role="alert">{{ error }}</p>
-    <p v-if="notice" class="message ok" role="status">{{ notice }}</p>
   </section>
   <ReaderRules :groups="groups" :selected="selected" />
+  </main>
 </template>

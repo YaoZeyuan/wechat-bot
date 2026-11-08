@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from './api'
-import ReaderSetup from './ReaderSetup.vue'
 import type { Device, HealthResponse, LogItem, Stats } from './types'
 
 const health = ref<HealthResponse | null>(null)
@@ -146,7 +145,7 @@ onMounted(async () => {
     <p v-if="error" class="message error">{{ error }}</p>
     <p v-if="notice" class="message ok">{{ notice }}</p>
 
-    <ReaderSetup />
+    <RouterLink to="/setup">微信读取与规则配置</RouterLink>
 
     <div class="grid">
       <section class="card">

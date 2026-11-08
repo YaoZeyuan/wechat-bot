@@ -57,6 +57,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  pickReaderDirectory: () =>
+    request<{ directory: string }>('/reader/accounts/pick-directory', { method: 'POST', body: '{}' }),
   extractReaderKey: () => request<{ key: string }>('/reader/key/extract', { method: 'POST', body: '{}' }),
   findReaderAccounts: (directory: string) =>
     request<{ items: { account: string; database_path: string }[] }>('/reader/accounts', {
