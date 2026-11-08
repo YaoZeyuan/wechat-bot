@@ -15,15 +15,19 @@ def main():
 
 def web_main():
     parser = argparse.ArgumentParser(description="Start the Vite development server on port 3000.")
-    parser.parse_args()
-    npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
-    if npm is None:
-        parser.exit(1, "Install Node.js with npm and add it to PATH.\n")
+    parser.add_argument("--port", type=int, default=3000)
+    args = parser.parse_args()
+    pnpm = shutil.which("pnpm.exe") if os.name == "nt" else None
+    pnpm = pnpm or shutil.which("pnpm.cmd" if os.name == "nt" else "pnpm")
+    if pnpm is None:
+        parser.exit(1, "Install Node.js and pnpm and add them to PATH.\n")
     web = Path(__file__).resolve().parent.parent / "web"
     try:
-        if not (web / "node_modules" / "vite").is_dir():
-            subprocess.run([npm, "ci"], cwd=web, check=True)
-        return subprocess.run([npm, "run", "dev", "--", "--strictPort"], cwd=web).returncode
+        if not (web / "node_modules" / ".pnpm").is_dir():
+            subprocess.run([pnpm, "install", "--frozen-lockfile"], cwd=web, check=True)
+        return subprocess.run(
+            [pnpm, "run", "dev", "--strictPort", "--port", str(args.port)], cwd=web,
+        ).returncode
     except subprocess.CalledProcessError as exc:
         return exc.returncode
     except KeyboardInterrupt:

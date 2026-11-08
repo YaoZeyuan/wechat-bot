@@ -57,7 +57,7 @@ cd wechat-bot
 uv sync
 
 cd web
-npm install
+pnpm install --frozen-lockfile
 cd ..
 ```
 
@@ -184,7 +184,7 @@ MIT，详见 [LICENSE](LICENSE)。
 
 ## 根目录开发命令
 
-安装 uv 和带 npm 的 Node.js 后，分别在终端运行：
+安装 uv 和Node.js 和 pnpm 后，分别在终端运行：
 
 ```sh
 uv run dev-server
