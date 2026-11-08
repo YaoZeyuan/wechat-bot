@@ -425,7 +425,7 @@ def probe(settings: SourceSettings) -> dict:
         log.warning("desktop_probe_failed", error=str(exc))
         raise HTTPException(502, str(exc)) from None
     except (KeyError, TypeError):
-        log.warning("Desktop reader received an unexpected CipherTalk response")
+        log.warning("desktop_probe_invalid_response")
         raise HTTPException(502, "密语代理返回了不兼容的会话数据") from None
     log.info("desktop_probe_succeeded", group_count=len(groups), message_readable=message_readable)
     return {

@@ -1,6 +1,6 @@
 """Local handlers and the HTTP callback transport for matching rules."""
 
-import logging
+import structlog
 from collections.abc import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
@@ -10,7 +10,7 @@ from pydantic import HttpUrl
 from .ciphertalk import NoRedirect
 from .reply import MessageEvent, Reply, Text
 
-log = logging.getLogger("uvicorn.error")
+log = structlog.get_logger("wechat_bot.plugins")
 MAX_REPLY_BYTES = 256 * 1024
 
 
@@ -52,7 +52,7 @@ def call_webhook(url: HttpUrl, event: MessageEvent, delivery_id: str) -> Reply |
     except ValueError:
         raise WebhookError("回调响应不符合回复协议") from None
     except Exception as exc:
-        log.warning("Webhook delivery failed id=%s error=%s", delivery_id, type(exc).__name__)
+        log.warning("webhook_delivery_failed", delivery_id=delivery_id, error=type(exc).__name__)
         raise
-    log.info("Webhook delivery succeeded id=%s", delivery_id)
+    log.info("webhook_delivery_succeeded", delivery_id=delivery_id)
     return reply

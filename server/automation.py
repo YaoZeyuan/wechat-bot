@@ -152,7 +152,7 @@ class Automation:
                 "UPDATE deliveries SET status='failed', error='Interrupted' WHERE status='processing'"
             ).rowcount
         if count:
-            log.warning("Marked %d interrupted deliveries for manual retry", count)
+            log.warning("delivery_recovery", count=count)
 
     def execute(self, delivery_id: int, rule: Rule, event: MessageEvent) -> Literal["pending", "acknowledged", "failed"]:
         task = error = None
