@@ -57,6 +57,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  extractReaderKey: () => request<{ key: string }>('/reader/key/extract', { method: 'POST', body: '{}' }),
+  findReaderAccounts: (directory: string) =>
+    request<{ items: { account: string; database_path: string }[] }>('/reader/accounts', {
+      method: 'POST', body: JSON.stringify({ directory }),
+    }),
   submitMockMessage: (group_id: string, text: string) =>
     request<{ status: string }>('/reader/mock/messages', {
       method: 'POST',

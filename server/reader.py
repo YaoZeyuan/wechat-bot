@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, SecretStr
 
 from .ciphertalk import CipherTalk, SourceError
 from .sqlcipher_reader import SqlCipherReader
+from .ciphertalk_cli import CipherTalkCLI
 from .automation import Automation, Rule
 from .plugins import HANDLERS
 from .polling import incoming_text, message_id, poll_group
@@ -222,6 +223,56 @@ class SourceSettings(BaseModel):
     database_path: str | None = Field(default=None, max_length=1024)
     account: str = Field(default="", max_length=256)
     database_key: SecretStr = SecretStr("")
+
+
+class AccountSearch(BaseModel):
+    directory: str = Field(default="", max_length=1024)
+
+
+@router.post("/key/extract")
+def extract_key() -> dict:
+    if os.getenv("WECHAT_BOT_KEY_EXTRACTION") != "1":
+        raise HTTPException(403, "未启用从微信进程获取密钥，请手动提供已有密钥")
+    try:
+        return {"key": CipherTalkCLI().extract_key()}
+    except SourceError as exc:
+        log.warning("WeChat key extraction failed: %s", exc)
+        raise HTTPException(502, str(exc)) from None
+
+
+@router.post("/accounts")
+def find_accounts(settings: AccountSearch) -> dict:
+    """Discover account folders from directory metadata alone."""
+    documents = Path.home() / "Documents"
+    roots = [Path(settings.directory).expanduser()] if settings.directory else [
+        documents / "xwechat_files", documents / "WeChat Files",
+    ]
+    accounts = {}
+    try:
+        for root in roots:
+            if not root.is_dir():
+                continue
+            if root.name == "db_storage":
+                candidates = [root.parent]
+            elif (root / "db_storage").is_dir():
+                candidates = [root]
+            else:
+                candidates = [root, *root.iterdir()]
+            for folder in candidates:
+                storage = folder / "db_storage"
+                if not (storage / "contact" / "contact.db").is_file():
+                    continue
+                path = str(storage.resolve())
+                account = folder.name
+                prefix, separator, suffix = account.rpartition("_")
+                if separator and prefix.startswith("wxid_") and len(suffix) == 4 and all(
+                    char in "0123456789abcdefABCDEF" for char in suffix
+                ):
+                    account = prefix
+                accounts[path] = {"account": account, "database_path": path}
+    except OSError:
+        raise HTTPException(422, "无法访问该目录，请检查路径和读取权限") from None
+    return {"items": sorted(accounts.values(), key=lambda item: item["database_path"])}
 
 
 @router.post("/probe")

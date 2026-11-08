@@ -78,6 +78,12 @@ class CipherTalkCLI:
             raise SourceError("本地密语 CLI 尚未配置数据库路径和密钥")
         raise SourceError("本地密语 CLI 无法打开微信数据库，请检查账号、路径和密钥")
 
+    def extract_key(self) -> str:
+        key = self._run("key", "get").get("keyHex")
+        if not isinstance(key, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", key):
+            raise SourceError("本地密钥工具未返回有效的数据库密钥")
+        return key
+
     def sessions(self, *, q="", limit=50) -> dict:
         data = self._run("sessions", "--type", "group", "--limit", "1000")
         groups = [item for item in data["sessions"] if q.casefold() in item["displayName"].casefold()]

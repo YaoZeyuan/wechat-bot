@@ -4,7 +4,9 @@ import { api } from './api'
 import ReaderRules from './ReaderRules.vue'
 
 const query = ref('')
-const mode = ref('automatic')
+const mode = ref('manual')
+const searchDirectory = ref('')
+const candidates = ref<Awaited<ReturnType<typeof api.findReaderAccounts>>['items']>([])
 const databasePath = ref('')
 const account = ref('')
 const databaseKey = ref('')
@@ -15,6 +17,46 @@ const selected = ref('')
 const busy = ref(false)
 const notice = ref('')
 const error = ref('')
+
+async function discoverAccounts() {
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  candidates.value = []
+  try {
+    candidates.value = (await api.findReaderAccounts(searchDirectory.value.trim())).items
+    notice.value = candidates.value.length
+      ? '请选择账号，并核对填入的账号 ID。'
+      : '未找到账号。请从微信的文件管理设置确认存储位置，或填入离线副本路径。'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+function chooseAccount(candidate: (typeof candidates.value)[number]) {
+  databasePath.value = candidate.database_path
+  account.value = candidate.account
+  databaseKey.value = ''
+  groups.value = []
+  selected.value = ''
+}
+
+async function extractKey() {
+  if (!window.confirm('此操作会向正在运行的微信进程安装 Hook。此前账号曾被锁定。确认继续？')) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    databaseKey.value = (await api.extractReaderKey()).key
+    notice.value = '密钥已填入，请验证它是否对应所选数据库。'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    busy.value = false
+  }
+}
 
 async function probe(checkMessages = false) {
   busy.value = true
@@ -47,11 +89,11 @@ async function probe(checkMessages = false) {
 <template>
   <section class="card">
     <h2>电脑端微信读取</h2>
-    <p>默认使用 SQLCipher 只读查询微信数据库，并自动读取本机账号配置。也可以连接已启动的兼容本地代理。</p>
+    <p>先查找账号目录，再确认账号 ID 并提供数据库密钥。建议使用离线副本验证读取。</p>
     <label>
       <select v-model="mode">
         <option value="automatic">SQLCipher（自动读取本机设置）</option>
-        <option value="manual">SQLCipher（手动验证）</option>
+        <option value="manual">SQLCipher（独立配置向导）</option>
         <option value="proxy">手动填写代理端口和令牌</option>
       </select>
     </label>
@@ -60,9 +102,19 @@ async function probe(checkMessages = false) {
       <label>访问令牌 <input v-model="token" type="password" autocomplete="off" /></label>
     </template>
     <template v-if="mode === 'manual'">
+      <label>搜索目录（可选）<input v-model="searchDirectory" placeholder="留空搜索默认目录，或填入微信存储位置" /></label>
+      <button type="button" :disabled="busy" @click="discoverAccounts">查找微信账号</button>
+      <ul v-if="candidates.length">
+        <li v-for="candidate in candidates" :key="candidate.database_path">
+          <button type="button" @click="chooseAccount(candidate)">{{ candidate.account }}</button>
+          {{ candidate.database_path }}
+        </li>
+      </ul>
       <label>数据库目录 <input v-model="databasePath" placeholder="账号目录或 db_storage" /></label>
       <label>微信账号 ID <input v-model="account" /></label>
       <label>数据库密钥 <input v-model="databaseKey" type="password" autocomplete="off" /></label>
+      <button type="button" :disabled="busy" @click="extractKey">从运行中的微信获取密钥</button>
+      <p>此功能需先在后端设置 WECHAT_BOT_KEY_EXTRACTION=1，并准备本地源码 CLI 和 wx_key.dll。</p>
       <p>这些字段只用于本次验证。后台监听使用本机设置或 MIYU_DB_PATH、MIYU_WXID、MIYU_KEY_HEX 环境变量。</p>
     </template>
     <form @submit.prevent="probe()">
