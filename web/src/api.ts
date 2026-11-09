@@ -66,7 +66,10 @@ export const api = {
     }),
   pickReaderDirectory: () =>
     request<{ directory: string }>('/reader/accounts/pick-directory', { method: 'POST', body: '{}' }),
-  extractReaderKey: () => request<{ key: string }>('/reader/key/extract', { method: 'POST', body: '{}' }),
+  scanReaderKey: (kind: 'database' | 'image', database_path: string, account: string) =>
+    request<{ key?: string; image_xor_key?: string; image_aes_key?: string }>(`/reader/key/scan/${kind}`, {
+      method: 'POST', body: JSON.stringify({ database_path, account }),
+    }),
   findReaderAccounts: (directory: string) =>
     request<{ items: { account: string; database_path: string }[] }>('/reader/accounts', {
       method: 'POST', body: JSON.stringify({ directory }),

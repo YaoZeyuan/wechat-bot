@@ -3,6 +3,7 @@ name = "wechat-bot"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
+    "cryptography>=44",
     "uiautomator2>=3.7,<4",
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.30,<1",

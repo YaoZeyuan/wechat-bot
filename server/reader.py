@@ -381,6 +381,58 @@ def extract_key() -> dict:
         key_extraction_lock.release()
 
 
+@router.post("/key/scan/{kind}")
+def scan_key(kind: Literal["database", "image"], selection: ReaderProfile) -> dict:
+    if os.getenv("WECHAT_BOT_KEY_EXTRACTION") != "1":
+        log.warning("wechat_key_extraction_disabled")
+        raise HTTPException(403, "后端未开启密钥提取")
+    if sys.platform != "win32":
+        raise HTTPException(501, "此密钥扫描工具只支持 Windows")
+    if not key_extraction_lock.acquire(blocking=False):
+        raise HTTPException(409, "已有密钥提取正在执行")
+    try:
+        report_key_progress("preparing", "正在检查所选账号和本机扫描工具")
+        path = Path(selection.database_path).expanduser().resolve()
+        account_root = path.parent if path.name == "db_storage" else path
+        storage = path if path.name == "db_storage" else path / "db_storage"
+        if not selection.account.strip() or not (storage / "contact" / "contact.db").is_file():
+            raise SourceError("请先选择有效的微信账号和数据库目录")
+        dll = Path(os.getenv("WECHAT_BOT_SCANNER_DLL") or profile_path.parent / "tools" / "wechat_key_tool.dll")
+        if not dll.is_file():
+            raise SourceError("缺少本机扫描库，请把 wechat_key_tool.dll 放到 local-data/tools")
+        report_key_progress("scanning", "正在查找图片模板并扫描密钥" if kind == "image" else "正在读取已登录微信的数据库密钥")
+        result = subprocess.run(
+            [sys.executable, "-m", "server.wechat_scan_worker", str(dll.resolve()), kind, str(account_root)],
+            capture_output=True, encoding="utf-8", timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if result.returncode:
+            raise SourceError(f"扫描工具异常退出（退出码 {result.returncode}）")
+        data = json.loads(result.stdout)
+        if data.get("error"):
+            errors = {
+                "image_template_missing": "未找到可用图片缓存，请先打开朋友圈并查看几张图片，再试一次",
+                "no_key": "未扫描到密钥，请确认目标账号已登录；提取图片密钥前请查看几张图片",
+                "challenge_failed": "扫描库初始化失败，请检查扫描库版本",
+            }
+            raise SourceError(errors.get(data["error"], "扫描库加载或调用失败，请检查扫描库与系统架构"))
+        if kind == "database":
+            if data.get("account") and data["account"] != selection.account:
+                raise SourceError("已登录账号与所选目录不一致，请先切换账号")
+            report_key_progress("validating", "已取得候选密钥，正在验证所选数据库")
+            SqlCipherReader(storage, data["key"], selection.account).sessions(limit=1)
+            data = {"key": data["key"]}
+        report_key_progress("complete", "已取得密钥，可验证并保存配置")
+        return data
+    except (SourceError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        message = str(exc) if isinstance(exc, SourceError) else "密钥扫描未完成，请检查本机工具或稍后重试"
+        report_key_progress("failed", message)
+        log.warning("wechat_key_extraction_failed", error=message, kind=kind, error_type=type(exc).__name__)
+        raise HTTPException(502, message) from None
+    finally:
+        key_extraction_lock.release()
+
+
 @router.post("/accounts")
 def find_accounts(settings: AccountSearch) -> dict:
     """Discover account folders from directory metadata alone."""

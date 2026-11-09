@@ -200,6 +200,8 @@ uv run dev-sender --help
 
 已有一致的离线数据库副本及对应密钥时，可导出一个群的文本消息。命令需要明确指定副本路径，未保存该账号密钥时会交互询问。
 
+Windows 手动取钥需要在后端启用 `WECHAT_BOT_KEY_EXTRACTION=1`，并提供 `local-data/tools/wechat_key_tool.dll`（也可通过 `WECHAT_BOT_SCANNER_DLL` 指定）。登录完成后点击数据库取钥按钮；图片取钥要先打开朋友圈并查看几张图片。两种操作都由用户点击触发，保持微信进程运行。
+
 ```sh
 uv run python -m server.export_history --snapshot local-data/snapshot --account wxid_example --group "群名" --output local-data/history.jsonl
 ```

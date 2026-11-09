@@ -16,9 +16,20 @@ from server.polling import poll_group
 from server.reply import SendTask
 from server.reader import TaskResult, claim_task, finish_task, pending_tasks
 from server.sqlcipher_reader import SqlCipherReader
+from server.wechat_scan_worker import image_template
 
 
 class DesktopPipelineTest(unittest.TestCase):
+    def test_image_template_extracts_xor_and_ciphertext(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            block = bytes(range(16))
+            (folder / "fixture_t.dat").write_bytes(
+                b"\x07\x08V2\x08\x07" + b"\x00" * 9 + block
+                + bytes((0x23 ^ 0xFF, 0x23 ^ 0xD9))
+            )
+            self.assertEqual(image_template(folder), (0x23, block))
+
     def test_local_reader_profile_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "local-data" / "reader-profile.json"

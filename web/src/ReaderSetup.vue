@@ -20,7 +20,6 @@ const error = ref('')
 const keyProgress = ref('')
 const keyError = ref('')
 const keyEnabled = ref<boolean>()
-const confirmRestart = ref(false)
 const keySteps = ref<{ stage: string; message: string }[]>([])
 
 onMounted(async () => {
@@ -91,8 +90,7 @@ function chooseAccount(candidate: (typeof candidates.value)[number]) {
   void rememberAccount()
 }
 
-async function extractKey() {
-  confirmRestart.value = false
+async function extractKey(kind: 'database' | 'image') {
   busy.value = true
   error.value = ''
   keyError.value = ''
@@ -114,8 +112,15 @@ async function extractKey() {
     }
   }, 750)
   try {
-    databaseKey.value = (await api.extractReaderKey()).key
-    notice.value = '密钥已填入，请验证它是否对应所选数据库。'
+    const result = await api.scanReaderKey(kind, databasePath.value.trim(), account.value.trim())
+    if (kind === 'database') {
+      databaseKey.value = result.key ?? ''
+      notice.value = '已验证数据库密钥与所选目录匹配，请保存配置。'
+    } else {
+      imageXorKey.value = result.image_xor_key ?? ''
+      if (result.image_aes_key) imageAesKey.value = result.image_aes_key
+      notice.value = result.image_aes_key ? '已填入图片 XOR 和 AES 密钥。' : '已填入图片 XOR 密钥；未找到 V2 图片模板。'
+    }
   } catch (err) {
     keyError.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -202,21 +207,21 @@ async function probe(checkMessages = false, saveProfile = false) {
         <pre>$env:WECHAT_BOT_KEY_EXTRACTION = '1'
 uv run dev-server</pre>
       </a-alert>
-      <a-button :disabled="busy || keyEnabled !== true" @click="confirmRestart = true">重启微信并获取密钥</a-button>
-      <a-modal v-model:visible="confirmRestart" title="重启微信并获取密钥" ok-text="确认重启" @ok="extractKey">
-        后端将关闭并重新启动微信。微信重新打开后，请登录要读取的账号。
-      </a-modal>
+      <p>先在电脑版微信登录目标账号，看到聊天列表后再点击。微信会保持运行。</p>
+      <a-button :disabled="busy || keyEnabled !== true || !databasePath.trim() || !account.trim()" @click="extractKey('database')">已登录，获取数据库密钥</a-button>
       <a-alert v-if="keyError" type="error">{{ keyError }}</a-alert>
       <a-alert v-if="keyProgress" type="info">{{ keyProgress }}</a-alert>
       <ol v-if="keySteps.length">
         <li v-for="step in keySteps" :key="step.stage">{{ step.message }}</li>
       </ol>
-      <p>如果已有密钥，可直接填写。自动获取需启用后端提取开关。启动提取后，如微信提示登录，请在等待期间完成登录。</p>
+      <p>如果已有密钥，可直接填写。</p>
       <p>保存后，后台监听会使用本机配置。已保存账号再次验证时可以留空密钥。</p>
       <h3>3. 图片解密密钥（可选）</h3>
+      <p>在电脑版微信打开朋友圈，点开几张图片并等待加载完成，再点击下方按钮。</p>
+      <a-button :disabled="busy || keyEnabled !== true || !databasePath.trim() || !account.trim()" @click="extractKey('image')">已浏览图片，获取图片密钥</a-button>
       <label>图片 XOR 密钥 <input v-model="imageXorKey" type="password" autocomplete="off" /></label>
       <label>图片 AES 密钥 <input v-model="imageAesKey" type="password" autocomplete="off" /></label>
-      <p>已有密钥可手动填写。此步骤保存配置，图片解密和自动扫描尚未接入。</p>
+      <p>已有密钥可手动填写。图片解密不在此步骤执行。</p>
       <a-button :disabled="busy || !databasePath.trim() || !account.trim()" @click="probe(false, true)">验证并保存配置</a-button>
     </template>
     <p v-if="busy" role="status">正在处理，请留意本机弹窗或微信登录提示…</p>
