@@ -64,10 +64,6 @@ export const api = {
     request<{ database_path: string; account: string }>('/reader/account-selection', {
       method: 'PUT', body: JSON.stringify({ database_path, account }),
     }),
-  importReaderImageKeys: (database_path: string, account: string) =>
-    request<{ image_xor_key: string; image_aes_key: string }>('/reader/image-keys/import', {
-      method: 'POST', body: JSON.stringify({ database_path, account }),
-    }),
   pickReaderDirectory: () =>
     request<{ directory: string }>('/reader/accounts/pick-directory', { method: 'POST', body: '{}' }),
   extractReaderKey: () => request<{ key: string }>('/reader/key/extract', { method: 'POST', body: '{}' }),

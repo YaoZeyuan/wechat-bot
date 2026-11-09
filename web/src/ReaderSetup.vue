@@ -91,21 +91,6 @@ function chooseAccount(candidate: (typeof candidates.value)[number]) {
   void rememberAccount()
 }
 
-async function importImageKeys() {
-  busy.value = true
-  error.value = ''
-  try {
-    const keys = await api.importReaderImageKeys(databasePath.value.trim(), account.value.trim())
-    imageXorKey.value = keys.image_xor_key
-    imageAesKey.value = keys.image_aes_key
-    notice.value = '已填入该账号的图片密钥，验证并保存配置后写入本机。'
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    busy.value = false
-  }
-}
-
 async function extractKey() {
   confirmRestart.value = false
   busy.value = true
@@ -231,8 +216,7 @@ uv run dev-server</pre>
       <h3>3. 图片解密密钥（可选）</h3>
       <label>图片 XOR 密钥 <input v-model="imageXorKey" type="password" autocomplete="off" /></label>
       <label>图片 AES 密钥 <input v-model="imageAesKey" type="password" autocomplete="off" /></label>
-      <a-button :disabled="busy || !account.trim()" @click="importImageKeys">从本机密语配置导入</a-button>
-      <p>已有密钥可填写或导入。此步骤保存配置，图片解密和自动扫描尚未接入。</p>
+      <p>已有密钥可手动填写。此步骤保存配置，图片解密和自动扫描尚未接入。</p>
       <a-button :disabled="busy || !databasePath.trim() || !account.trim()" @click="probe(false, true)">验证并保存配置</a-button>
     </template>
     <p v-if="busy" role="status">正在处理，请留意本机弹窗或微信登录提示…</p>

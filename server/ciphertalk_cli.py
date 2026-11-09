@@ -191,7 +191,7 @@ class CipherTalkCLI:
     def extract_with_progress(self, pid: int, progress) -> str:
         errors = {
             "dll_failed": "无法加载密钥 DLL，请检查库文件和 Python 架构是否匹配。",
-            "hook_failed": "DLL 已加载，但 Hook 初始化失败。请检查微信版本和进程权限。",
+            "hook_failed": "DLL 已加载，但 Hook 初始化失败，取钥已停止。继续登录或等待不会恢复此次取钥。",
             "timeout": "Hook 已初始化，但等待密钥超时。请确认在等待期间登录了目标账号。",
         }
         try:
@@ -252,4 +252,3 @@ class CipherTalkCLI:
 
     def messages(self, session_id: str, *, limit=1, offset=0, **filters) -> dict:
         return self._run("messages", session_id, "--limit", str(limit), "--offset", str(offset))
-

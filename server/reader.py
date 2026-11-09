@@ -4,11 +4,10 @@ import asyncio
 import hashlib
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 import structlog
-from contextlib import asynccontextmanager, closing
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -325,36 +324,8 @@ def save_account_selection(selection: ReaderProfile) -> ReaderProfile:
     if not selection.database_path.strip() or not selection.account.strip():
         raise HTTPException(422, "请填写数据库目录和账号 ID")
     save_local_json(profile_path.with_name("account-selection.json"), selection.model_dump())
+    log.info("reader_account_selection_saved")
     return selection
-
-
-@router.post("/image-keys/import")
-def import_image_keys(selection: ReaderProfile) -> dict:
-    appdata = os.getenv("APPDATA")
-    if not appdata:
-        raise HTTPException(404, "未找到本机密语配置")
-    path = Path(appdata) / "CipherTalk" / "ciphertalk-config.db"
-    if not path.is_file():
-        raise HTTPException(404, "未找到本机密语配置")
-    try:
-        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
-            values = {key: json.loads(value) for key, value in db.execute(
-                "SELECT key,value FROM config WHERE key IN ('accounts','myWxid','imageXorKey','imageAesKey')"
-            )}
-        accounts = values.get("accounts") or []
-        matches = [item for item in accounts if item.get("wxid") == selection.account]
-        if len(matches) > 1:
-            raise HTTPException(409, "密语中有多条同账号配置，请手动填写图片密钥")
-        account = matches[0] if matches else values if values.get("myWxid") == selection.account else {}
-        xor_key = str(account.get("imageXorKey") or "")
-        aes_key = str(account.get("imageAesKey") or "")
-    except (sqlite3.Error, ValueError, TypeError, AttributeError):
-        log.warning("image_key_import_failed")
-        raise HTTPException(502, "无法读取本机密语图片密钥配置") from None
-    if not xor_key and not aes_key:
-        raise HTTPException(404, "密语未保存此账号的图片密钥")
-    log.info("image_key_import_succeeded")
-    return {"image_xor_key": xor_key, "image_aes_key": aes_key}
 
 
 class AccountSearch(BaseModel):
@@ -363,6 +334,7 @@ class AccountSearch(BaseModel):
 
 @router.post("/accounts/pick-directory")
 def pick_directory() -> dict:
+    log.info("reader_directory_picker_opening")
     script = (
         "import tkinter as tk; from tkinter import filedialog; "
         "root=tk.Tk(); root.withdraw(); root.attributes('-topmost', True); "
@@ -376,10 +348,14 @@ def pick_directory() -> dict:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired:
+        log.warning("reader_directory_picker_timeout")
         raise HTTPException(408, "目录选择超时，请重新打开选择窗口") from None
     except (OSError, subprocess.CalledProcessError):
+        log.warning("reader_directory_picker_failed")
         raise HTTPException(503, "无法打开本机目录选择窗口，可使用自动查找或展开手动输入") from None
-    return {"directory": result.stdout.strip()}
+    directory = result.stdout.strip()
+    log.info("reader_directory_picker_finished", selected=bool(directory))
+    return {"directory": directory}
 
 
 @router.post("/key/extract")
@@ -436,7 +412,9 @@ def find_accounts(settings: AccountSearch) -> dict:
                     account = prefix
                 accounts[path] = {"account": account, "database_path": path}
     except OSError:
+        log.warning("reader_account_search_failed", custom_directory=bool(settings.directory))
         raise HTTPException(422, "无法访问该目录，请检查路径和读取权限") from None
+    log.info("reader_account_search_finished", count=len(accounts), custom_directory=bool(settings.directory))
     return {"items": sorted(accounts.values(), key=lambda item: item["database_path"])}
 
 
