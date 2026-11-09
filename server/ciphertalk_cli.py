@@ -99,12 +99,10 @@ class CipherTalkCLI:
             raise SourceError("本地密钥工具未返回有效的数据库密钥")
         return key
 
-    def restart_wechat(self, progress):
+    @staticmethod
+    def restart_wechat(progress):
         if os.name != "nt":
             raise SourceError("自动重启微信目前只支持 Windows")
-        dll = self.key_dll()
-        if not dll.is_file():
-            raise SourceError("本地密钥工具缺少 wx_key.dll，微信未重启")
         discover = """
             $ErrorActionPreference = 'Stop'
             $processes = @(Get-Process -Name Weixin -ErrorAction SilentlyContinue)
@@ -154,7 +152,7 @@ class CipherTalkCLI:
             try:
                 return subprocess.run(
                     ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-                    capture_output=True, timeout=30, env={**self.env, **extra_env},
+                    capture_output=True, timeout=30, env={**os.environ, **extra_env},
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
             except (OSError, subprocess.TimeoutExpired):

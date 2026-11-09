@@ -20,6 +20,7 @@ const error = ref('')
 const keyProgress = ref('')
 const keyError = ref('')
 const keyEnabled = ref<boolean>()
+const confirmRestart = ref(false)
 const keySteps = ref<{ stage: string; message: string }[]>([])
 
 onMounted(async () => {
@@ -90,7 +91,8 @@ function chooseAccount(candidate: (typeof candidates.value)[number]) {
   void rememberAccount()
 }
 
-async function extractKey(kind: 'database' | 'image') {
+async function extractKey(kind: 'database' | 'image', restart = false) {
+  confirmRestart.value = false
   busy.value = true
   error.value = ''
   keyError.value = ''
@@ -112,7 +114,7 @@ async function extractKey(kind: 'database' | 'image') {
     }
   }, 750)
   try {
-    const result = await api.scanReaderKey(kind, databasePath.value.trim(), account.value.trim())
+    const result = await api.scanReaderKey(kind, databasePath.value.trim(), account.value.trim(), restart)
     if (kind === 'database') {
       databaseKey.value = result.key ?? ''
       notice.value = '已验证数据库密钥与所选目录匹配，请保存配置。'
@@ -210,6 +212,10 @@ uv run dev-server</pre>
       <p>先在电脑版微信登录目标账号，看到聊天列表后再点击。微信会保持运行。</p>
       <p>如果诊断显示已读取进程但未命中，先核对账号和目录，再考虑手动退出微信、重新打开并登录后重试。</p>
       <a-button :disabled="busy || keyEnabled !== true || !databasePath.trim() || !account.trim()" @click="extractKey('database')">已登录，获取数据库密钥</a-button>
+      <a-button :disabled="busy || keyEnabled !== true || !databasePath.trim() || !account.trim()" @click="confirmRestart = true">重启后等待登录并扫描</a-button>
+      <a-modal v-model:visible="confirmRestart" title="重启微信并扫描登录阶段" ok-text="确认重启" @ok="extractKey('database', true)">
+        微信将关闭并重新打开。请在微信窗口登录目标账号，后端将在重启后最多扫描 60 秒。
+      </a-modal>
       <a-alert v-if="keyError" type="error">{{ keyError }}</a-alert>
       <a-alert v-if="keyProgress" type="info">{{ keyProgress }}</a-alert>
       <ol v-if="keySteps.length">

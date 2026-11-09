@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import structlog
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -382,12 +383,14 @@ def extract_key() -> dict:
 
 
 @router.post("/key/scan/{kind}")
-def scan_key(kind: Literal["database", "image"], selection: ReaderProfile) -> dict:
+def scan_key(kind: Literal["database", "image"], selection: ReaderProfile, restart: bool = False) -> dict:
     if os.getenv("WECHAT_BOT_KEY_EXTRACTION") != "1":
         log.warning("wechat_key_extraction_disabled")
         raise HTTPException(403, "后端未开启密钥提取")
     if sys.platform != "win32":
         raise HTTPException(501, "此密钥扫描工具只支持 Windows")
+    if restart and kind != "database":
+        raise HTTPException(422, "仅数据库密钥扫描支持重启")
     if not key_extraction_lock.acquire(blocking=False):
         raise HTTPException(409, "已有密钥提取正在执行")
     try:
@@ -401,14 +404,36 @@ def scan_key(kind: Literal["database", "image"], selection: ReaderProfile) -> di
         if not dll.is_file():
             raise SourceError("缺少本机扫描库，请把 wechat_key_tool.dll 放到 local-data/tools")
         report_key_progress("scanning", "正在查找图片模板并扫描密钥" if kind == "image" else "正在读取已登录微信的数据库密钥")
-        result = subprocess.run(
-            [sys.executable, "-m", "server.wechat_scan_worker", str(dll.resolve()), kind, str(account_root)],
-            capture_output=True, encoding="utf-8", timeout=30,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if result.returncode:
-            raise SourceError(f"扫描工具异常退出（退出码 {result.returncode}）")
-        data = json.loads(result.stdout)
+        if restart:
+            CipherTalkCLI.restart_wechat(report_key_progress)
+            report_key_progress("wechat_started", "微信已重新启动，请登录目标账号；后端正在等待密钥加载")
+        deadline = time.monotonic() + 60
+        for attempt in range(1, 61):
+            if restart:
+                log.info("wechat_login_scan_attempt", attempt=attempt)
+            result = subprocess.run(
+                [sys.executable, "-m", "server.wechat_scan_worker", str(dll.resolve()), kind, str(account_root)],
+                capture_output=True, encoding="utf-8",
+                timeout=min(30, max(1, deadline - time.monotonic())),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if result.returncode:
+                raise SourceError(f"扫描工具异常退出（退出码 {result.returncode}）")
+            data = json.loads(result.stdout)
+            if restart and data.get("key"):
+                try:
+                    if data.get("account") and data["account"] != selection.account:
+                        raise SourceError("候选密钥属于其他账号")
+                    SqlCipherReader(storage, data["key"], selection.account).sessions(limit=1)
+                except SourceError:
+                    log.info("wechat_login_candidate_rejected", attempt=attempt)
+                    data.pop("key", None)
+                    data["error"] = "no_key"
+            diag = data.get("diagnostics") or {}
+            retry = data.get("error") == "no_key" and diag.get("auth") is not False and diag.get("db_ok") is not False
+            if not restart or not retry or time.monotonic() + 1 >= deadline:
+                break
+            time.sleep(1)
         if data.get("dll_loaded"):
             report_key_progress("dll_loaded", "扫描 DLL 已加载")
         if data.get("challenge_created"):
