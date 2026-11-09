@@ -29,7 +29,8 @@ from .reply import MessageEvent, SendTask
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
 log = structlog.get_logger("wechat_bot.reader")
 automation = Automation(Path(__file__).resolve().parent.parent / "automation.db")
-reader_status = {"enabled": False, "running": False, "error": None, "last_success_at": None}
+reader_status = {"enabled": False, "running": False, "error": None, "last_success_at": None, "interval_seconds": 5}
+monitoring_wake: asyncio.Event | None = None
 key_extraction_lock = Lock()
 key_progress = {"stage": "idle", "message": "", "steps": []}
 profile_path = Path(__file__).resolve().parent.parent / "local-data" / "reader-profile.json"
@@ -47,7 +48,7 @@ def get_key_progress() -> dict:
 
 
 def poll_once():
-    groups = {rule.group_id for rule in automation.rules() if rule.enabled}
+    groups = {item["group_id"] for item in automation.monitored_groups() if item["enabled"]}
     if not groups:
         return False
     profile = load_profile()
@@ -75,13 +76,17 @@ def poll_once():
 
 @asynccontextmanager
 async def reader_lifespan(app):
+    global monitoring_wake
     await asyncio.to_thread(automation.recover_interrupted)
     enabled = await asyncio.to_thread(automation.monitoring_enabled, os.getenv("WECHAT_BOT_POLL") == "1")
-    reader_status.update(enabled=enabled, running=False, error=None, last_success_at=None)
+    interval = await asyncio.to_thread(automation.monitoring_interval)
+    reader_status.update(enabled=enabled, running=False, error=None, last_success_at=None, interval_seconds=interval)
     stop = asyncio.Event()
+    wake = monitoring_wake = asyncio.Event()
 
     async def worker():
         while not stop.is_set():
+            wake.clear()
             if reader_status["enabled"]:
                 reader_status["running"] = True
                 try:
@@ -96,7 +101,7 @@ async def reader_lifespan(app):
                 finally:
                     reader_status["running"] = False
             try:
-                await asyncio.wait_for(stop.wait(), timeout=5)
+                await asyncio.wait_for(wake.wait(), timeout=reader_status["interval_seconds"])
             except TimeoutError:
                 pass
 
@@ -105,7 +110,9 @@ async def reader_lifespan(app):
         yield
     finally:
         stop.set()
+        wake.set()
         await task
+        monitoring_wake = None
 
 
 @router.get("/status")
@@ -115,15 +122,22 @@ def status() -> dict:
 
 class MonitoringSettings(BaseModel):
     enabled: bool
+    interval_seconds: int | None = Field(default=None, ge=1, le=100)
 
 
 @router.put("/status")
 async def set_status(settings: MonitoringSettings) -> dict:
-    if settings.enabled and not any(rule.enabled for rule in await asyncio.to_thread(automation.rules)):
-        raise HTTPException(409, "请先启用至少一条关键词规则")
-    await asyncio.to_thread(automation.set_monitoring, settings.enabled)
+    if settings.enabled and not reader_status["enabled"] and not any(
+        group["enabled"] for group in await asyncio.to_thread(automation.monitored_groups)
+    ):
+        raise HTTPException(409, "请先启用至少一个监听群")
+    await asyncio.to_thread(automation.set_monitoring, settings.enabled, settings.interval_seconds)
     reader_status.update(enabled=settings.enabled, error=None)
-    log.info("desktop_polling_changed", enabled=settings.enabled)
+    if settings.interval_seconds is not None:
+        reader_status["interval_seconds"] = settings.interval_seconds
+    if monitoring_wake is not None:
+        monitoring_wake.set()
+    log.info("desktop_polling_changed", enabled=settings.enabled, interval_seconds=reader_status["interval_seconds"])
     return status()
 
 
@@ -135,6 +149,7 @@ def rules() -> dict:
 @router.put("/rules")
 def save_rule(rule: Rule) -> Rule:
     automation.save_rule(rule)
+    log.info("desktop_group_rule_saved", group_id=rule.group_id, handler=rule.handler, enabled=rule.enabled)
     return rule
 
 
@@ -283,6 +298,35 @@ def history_source() -> SqlCipherReader:
     if profile is None:
         raise SourceError("请先在微信初始化页验证并保存数据库配置")
     return SqlCipherReader(Path(profile.database_path), profile.database_key.get_secret_value(), profile.account)
+
+
+@router.get("/groups")
+def monitor_groups(q: str = Query("", max_length=100)) -> dict:
+    try:
+        result = history_source().sessions(q=q, limit=50)
+    except SourceError as exc:
+        log.warning("desktop_probe_failed", error=str(exc))
+        raise HTTPException(502, str(exc)) from None
+    log.info("desktop_probe_succeeded", group_count=len(result["items"]))
+    return result
+
+
+class GroupMonitoring(BaseModel):
+    group_id: str = Field(min_length=1, max_length=256, pattern=r"^[^\s]+@chatroom$")
+    name: str = Field(min_length=1, max_length=256)
+    enabled: bool
+
+
+@router.get("/monitored-groups", response_model=list[GroupMonitoring])
+def list_monitored_groups():
+    return automation.monitored_groups()
+
+
+@router.put("/monitored-groups")
+def update_monitored_group(group: GroupMonitoring) -> GroupMonitoring:
+    automation.set_group_monitoring(group.group_id, group.name, group.enabled)
+    log.info("desktop_group_monitoring_changed", group_id=group.group_id, enabled=group.enabled)
+    return group
 
 
 @router.get("/history/conversations")

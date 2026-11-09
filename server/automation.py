@@ -4,6 +4,7 @@ import structlog
 import sqlite3
 from contextlib import closing, contextmanager
 from pathlib import Path
+from threading import Lock
 from typing import Literal
 
 from pydantic import HttpUrl, model_validator
@@ -34,12 +35,23 @@ class Rule(ContractModel):
 class Automation:
     def __init__(self, path: Path):
         self.path = path
+        self._schema_ready = False
+        self._schema_lock = Lock()
 
     @contextmanager
     def database(self):
         with closing(sqlite3.connect(self.path)) as db, db:
             db.row_factory = sqlite3.Row
+            if not self._schema_ready:
+                self._initialize(db)
+            yield db
+
+    def _initialize(self, db):
+        with self._schema_lock:
+            if self._schema_ready:
+                return
             db.executescript("""
+                BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS rules (
                     group_id TEXT NOT NULL, keyword TEXT NOT NULL, config TEXT NOT NULL,
                     PRIMARY KEY(group_id, keyword)
@@ -56,23 +68,63 @@ class Automation:
                 CREATE TABLE IF NOT EXISTS reader_settings (
                     id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS reader_interval (
+                    id INTEGER PRIMARY KEY CHECK(id=1),
+                    seconds INTEGER NOT NULL CHECK(seconds BETWEEN 1 AND 100)
+                );
+                CREATE TABLE IF NOT EXISTS monitored_groups (
+                    group_id TEXT PRIMARY KEY, name TEXT NOT NULL, enabled INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS automation_migrations (name TEXT PRIMARY KEY);
+                INSERT OR IGNORE INTO monitored_groups(group_id, name, enabled)
+                    SELECT group_id, group_id, 1 FROM rules
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM automation_migrations WHERE name='separate_monitored_groups'
+                    )
+                    AND json_extract(config, '$.enabled') = 1
+                    AND group_id LIKE '%@chatroom';
+                INSERT OR IGNORE INTO automation_migrations VALUES ('separate_monitored_groups');
                 CREATE TABLE IF NOT EXISTS delivery_inputs (
                     id INTEGER PRIMARY KEY, event TEXT NOT NULL, rule TEXT NOT NULL
                 );
+                COMMIT;
             """)
-            yield db
+            self._schema_ready = True
 
     def monitoring_enabled(self, default: bool = False) -> bool:
         with self.database() as db:
             row = db.execute("SELECT enabled FROM reader_settings WHERE id=1").fetchone()
             return bool(row["enabled"]) if row is not None else default
 
-    def set_monitoring(self, enabled: bool):
+    def monitoring_interval(self) -> int:
+        with self.database() as db:
+            row = db.execute("SELECT seconds FROM reader_interval WHERE id=1").fetchone()
+            return row["seconds"] if row else 5
+
+    def monitored_groups(self) -> list[dict]:
+        with self.database() as db:
+            return [dict(row) for row in db.execute(
+                "SELECT group_id, name, enabled FROM monitored_groups ORDER BY name, group_id"
+            )]
+
+    def set_group_monitoring(self, group_id: str, name: str, enabled: bool):
+        with self.database() as db:
+            db.execute(
+                "INSERT INTO monitored_groups VALUES (?, ?, ?) ON CONFLICT(group_id) "
+                "DO UPDATE SET name=excluded.name, enabled=excluded.enabled", (group_id, name, enabled),
+            )
+
+    def set_monitoring(self, enabled: bool, interval_seconds: int | None = None):
         with self.database() as db:
             db.execute(
                 "INSERT INTO reader_settings VALUES (1, ?) ON CONFLICT(id) "
                 "DO UPDATE SET enabled=excluded.enabled", (enabled,),
             )
+            if interval_seconds is not None:
+                db.execute(
+                    "INSERT INTO reader_interval VALUES (1, ?) ON CONFLICT(id) "
+                    "DO UPDATE SET seconds=excluded.seconds", (interval_seconds,),
+                )
 
     def save_rule(self, rule: Rule):
         with self.database() as db:

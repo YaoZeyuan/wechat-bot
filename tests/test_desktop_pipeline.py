@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from sqlcipher3 import dbapi2
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from server.automation import Automation, Rule
 from server import reader
@@ -20,6 +21,33 @@ from server.wechat_scan_worker import image_template
 
 
 class DesktopPipelineTest(unittest.TestCase):
+    def test_group_monitoring_is_independent_from_keyword_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "automation.db"
+            bot = Automation(path)
+            group = "fixture@chatroom"
+            bot.save_rule(Rule(group_id=group, keyword="test"))
+            self.assertEqual(bot.monitored_groups(), [])
+            bot.set_group_monitoring(group, "fixture", True)
+            bot.save_rule(Rule(group_id=group, keyword="test", enabled=False))
+            self.assertTrue(Automation(path).monitored_groups()[0]["enabled"])
+            bot.set_group_monitoring(group, "fixture", False)
+            self.assertFalse(Automation(path).monitored_groups()[0]["enabled"])
+            self.assertEqual(len(bot.rules()), 1)
+
+    def test_poll_interval_persists_and_rejects_out_of_range_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "automation.db"
+            bot = Automation(path)
+            self.assertEqual(bot.monitoring_interval(), 5)
+            for seconds in (1, 100):
+                settings = reader.MonitoringSettings(enabled=False, interval_seconds=seconds)
+                bot.set_monitoring(settings.enabled, settings.interval_seconds)
+                self.assertEqual(Automation(path).monitoring_interval(), seconds)
+            for seconds in (0, 101):
+                with self.assertRaises(ValidationError):
+                    reader.MonitoringSettings(enabled=False, interval_seconds=seconds)
+
     def test_database_scan_reports_zero_read_without_suggesting_login(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

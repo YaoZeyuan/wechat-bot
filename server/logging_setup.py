@@ -15,6 +15,8 @@ MESSAGES = {
     "desktop_group_poll_failed": "读取群消息失败",
     "desktop_poll_unavailable": "桌面消息轮询失败",
     "desktop_polling_changed": "桌面消息监听状态已更新",
+    "desktop_group_monitoring_changed": "群监听状态已更新",
+    "desktop_group_rule_saved": "群内关键词规则已保存",
     "phone_task_claimed": "待发送任务已领取",
     "phone_task_result": "待发送任务结果已回写",
     "reader_profile_load_failed": "读取本机微信配置失败",

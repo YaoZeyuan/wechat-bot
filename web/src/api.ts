@@ -38,6 +38,12 @@ export interface KeywordRule {
   enabled: boolean
 }
 
+export interface MonitoredGroup {
+  group_id: string
+  name: string
+  enabled: boolean
+}
+
 interface Delivery {
   id: number
   group_id: string
@@ -51,6 +57,7 @@ interface Delivery {
 
 interface ReaderStatus {
   enabled: boolean
+  interval_seconds: number
   running: boolean
   error: string | null
   last_success_at: string | null
@@ -76,6 +83,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  monitoredGroups: () => request<MonitoredGroup[]>('/reader/monitored-groups'),
+  saveMonitoredGroup: (group: MonitoredGroup) =>
+    request<MonitoredGroup>('/reader/monitored-groups', { method: 'PUT', body: JSON.stringify(group) }),
+  monitorGroups: (q: string) =>
+    request<{ items: { sessionId: string; displayName: string }[]; hasMore: boolean }>(
+      `/reader/groups?${new URLSearchParams({ q })}`,
+    ),
   conversations: (q: string, kind: string, offset: number) =>
     request<{ items: Conversation[]; has_more: boolean }>(
       `/reader/history/conversations?${new URLSearchParams({ q, kind, offset: String(offset) })}`,
@@ -110,8 +124,8 @@ export const api = {
       }),
     }),
   readerStatus: () => request<ReaderStatus>('/reader/status'),
-  setReaderStatus: (enabled: boolean) =>
-    request<ReaderStatus>('/reader/status', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  setReaderStatus: (enabled: boolean, interval_seconds?: number) =>
+    request<ReaderStatus>('/reader/status', { method: 'PUT', body: JSON.stringify({ enabled, interval_seconds }) }),
   readerRules: () => request<{ items: KeywordRule[]; handlers: string[] }>('/reader/rules'),
   saveReaderRule: (rule: KeywordRule) =>
     request<KeywordRule>('/reader/rules', { method: 'PUT', body: JSON.stringify(rule) }),
