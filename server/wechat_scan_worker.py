@@ -46,13 +46,16 @@ def scan(dll_path: str, mode: str, root: Path) -> dict:
             return {"error": "image_template_missing"}
         if block is None:
             return {"image_xor_key": f"0x{xor:02x}", "image_aes_key": ""}
-    dll = ctypes.CDLL(dll_path)
+    try:
+        dll = ctypes.CDLL(dll_path)
+    except OSError:
+        return {"error": "dll_load_failed"}
     challenge = dll.wkt_challenge
     challenge.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
     challenge.restype = ctypes.c_int
     nonce = ctypes.create_string_buffer(32)
     if challenge(nonce, len(nonce)) != 32:
-        return {"error": "challenge_failed"}
+        return {"error": "challenge_failed", "dll_loaded": True}
     signer = load_der_private_key(bytes(value ^ 0x5A for value in SIGNER), password=None)
     signature = signer.sign(nonce.raw)
     if mode == "database":
@@ -67,21 +70,46 @@ def scan(dll_path: str, mode: str, root: Path) -> dict:
     free.argtypes = [ctypes.c_void_p]
     free.restype = None
     result = fn(*args)
-    if not result:
-        return {"error": "no_key"}
-    try:
-        value = ctypes.string_at(result).decode("utf-8").strip()
-    finally:
-        free(result)
+    value = ""
+    if result:
+        try:
+            value = ctypes.string_at(result).decode("utf-8").strip()
+        finally:
+            free(result)
+    state = {"dll_loaded": True, "challenge_created": True}
     if mode == "image":
         if len(value) < 16:
-            return {"error": "no_key"}
-        return {"image_xor_key": f"0x{xor:02x}", "image_aes_key": value[:16]}
-    account = json.loads(value)
+            return {**state, "error": "no_key"}
+        return {**state, "image_xor_key": f"0x{xor:02x}", "image_aes_key": value[:16]}
+    account = json.loads(value or "{}")
     key = account.get("db_key") or ""
+    if re.fullmatch(r"[0-9a-fA-F]{64}", key):
+        return {**state, "key": key, "account": account.get("wxid") or ""}
+    diagnostic = getattr(dll, "wkt_scan_diag_auth", None)
+    if diagnostic is None:
+        return {**state, "error": "diagnostics_unavailable"}
+    # The diagnostic call uses its own challenge, and validates candidates
+    # against the selected account's contact.db.
+    if challenge(nonce, len(nonce)) != 32:
+        return {**state, "error": "challenge_failed"}
+    signature = signer.sign(nonce.raw)
+    diagnostic.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p]
+    diagnostic.restype = ctypes.c_void_p
+    result = diagnostic(signature, len(signature), str(root / "db_storage/contact/contact.db").encode())
+    if not result:
+        return {**state, "error": "diagnostics_unavailable"}
+    try:
+        data = json.loads(ctypes.string_at(result).decode("utf-8"))
+    finally:
+        free(result)
+    state["diagnostics"] = {
+        name: data[name] for name in ("auth", "db_ok", "pids", "opened", "bytes", "markers", "candidates")
+        if type(data.get(name)) in (int, bool)
+    }
+    key = data.get("key") or ""
     if not re.fullmatch(r"[0-9a-fA-F]{64}", key):
-        return {"error": "no_key"}
-    return {"key": key, "account": account.get("wxid") or ""}
+        return {**state, "error": "no_key"}
+    return {**state, "key": key}
 
 
 if __name__ == "__main__":

@@ -20,6 +20,27 @@ from server.wechat_scan_worker import image_template
 
 
 class DesktopPipelineTest(unittest.TestCase):
+    def test_database_scan_reports_zero_read_without_suggesting_login(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contact = root / "db_storage/contact/contact.db"
+            contact.parent.mkdir(parents=True)
+            contact.touch()
+            dll = root / "wechat_key_tool.dll"
+            dll.touch()
+            reply = {"dll_loaded": True, "challenge_created": True, "error": "no_key",
+                     "diagnostics": {"auth": True, "pids": 1, "opened": 0, "bytes": 0}}
+            with patch.dict("os.environ", {"WECHAT_BOT_KEY_EXTRACTION": "1", "WECHAT_BOT_SCANNER_DLL": str(dll)}):
+                with patch.object(reader.sys, "platform", "win32"), patch.object(reader, "key_progress", {}):
+                    with patch.object(reader.subprocess, "run") as run:
+                        run.return_value.returncode = 0
+                        run.return_value.stdout = json.dumps(reply)
+                        selection = reader.ReaderProfile(database_path=tmp, account="fixture")
+                        with self.assertRaises(HTTPException) as failure:
+                            reader.scan_key("database", selection)
+                        self.assertIn("未读取到进程数据", failure.exception.detail)
+                        self.assertIn("dll_loaded", [step["stage"] for step in reader.get_key_progress()["steps"]])
+
     def test_image_template_extracts_xor_and_ciphertext(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)

@@ -208,6 +208,7 @@ async function probe(checkMessages = false, saveProfile = false) {
 uv run dev-server</pre>
       </a-alert>
       <p>先在电脑版微信登录目标账号，看到聊天列表后再点击。微信会保持运行。</p>
+      <p>如果诊断显示已读取进程但未命中，先核对账号和目录，再考虑手动退出微信、重新打开并登录后重试。</p>
       <a-button :disabled="busy || keyEnabled !== true || !databasePath.trim() || !account.trim()" @click="extractKey('database')">已登录，获取数据库密钥</a-button>
       <a-alert v-if="keyError" type="error">{{ keyError }}</a-alert>
       <a-alert v-if="keyProgress" type="info">{{ keyProgress }}</a-alert>

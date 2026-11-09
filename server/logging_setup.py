@@ -27,6 +27,7 @@ MESSAGES = {
     "reader_account_search_failed": "查找微信账号目录失败",
     "reader_account_search_finished": "微信账号目录查找完成",
     "wechat_key_extraction_failed": "获取微信数据库密钥失败",
+    "wechat_key_scan_diagnostics": "微信扫描库已返回诊断计数",
     "wechat_key_extraction_disabled": "后端未启用微信密钥提取，请求已拒绝",
     "desktop_probe_failed": "微信数据库连接验证失败",
     "desktop_probe_invalid_response": "读取端返回了不兼容的数据",

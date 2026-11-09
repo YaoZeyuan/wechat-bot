@@ -409,12 +409,37 @@ def scan_key(kind: Literal["database", "image"], selection: ReaderProfile) -> di
         if result.returncode:
             raise SourceError(f"扫描工具异常退出（退出码 {result.returncode}）")
         data = json.loads(result.stdout)
+        if data.get("dll_loaded"):
+            report_key_progress("dll_loaded", "扫描 DLL 已加载")
+        if data.get("challenge_created"):
+            report_key_progress("challenge_created", "扫描库已生成挑战，已提交签名并发起扫描")
+        diagnostics = data.get("diagnostics") or {}
+        if diagnostics:
+            log.info("wechat_key_scan_diagnostics", kind=kind, **diagnostics)
+            report_key_progress(
+                "diagnostics",
+                f"找到进程 {diagnostics.get('pids', '未知')} 个，打开 {diagnostics.get('opened', '未知')} 个，"
+                f"读取 {diagnostics.get('bytes', '未知')} 字节，找到 {diagnostics.get('candidates', '未知')} 个候选。",
+            )
         if data.get("error"):
             errors = {
-                "image_template_missing": "未找到可用图片缓存，请先打开朋友圈并查看几张图片，再试一次",
-                "no_key": "未扫描到密钥，请确认目标账号已登录；提取图片密钥前请查看几张图片",
+                "image_template_missing": "所选目录没有可用图片缓存，尚未加载 DLL。若选的是离线副本，微信打开的新图片不会写到该副本。",
+                "no_key": "已调用图片扫描，但没有返回 AES 密钥。请确认查看的图片缓存位于所选账号目录。",
+                "dll_load_failed": "扫描 DLL 未能加载，请检查文件和 Python 架构",
                 "challenge_failed": "扫描库初始化失败，请检查扫描库版本",
+                "diagnostics_unavailable": "扫描未返回数据库密钥，且扫描库未提供诊断结果。",
             }
+            if kind == "database" and data["error"] == "no_key":
+                if diagnostics.get("auth") is False:
+                    errors["no_key"] = "扫描库验签失败，请检查 DLL 和扫描协议版本是否一致。"
+                elif diagnostics.get("db_ok") is False:
+                    errors["no_key"] = "扫描库无法用所选 contact.db 校验密钥，请核对目录和数据库文件。"
+                elif diagnostics.get("pids") == 0:
+                    errors["no_key"] = "扫描库未找到微信进程。请打开电脑版微信并登录目标账号。"
+                elif diagnostics.get("opened") == 0 or diagnostics.get("bytes") == 0:
+                    errors["no_key"] = "扫描库找到了微信，但未读取到进程数据。请确认后端和微信由同一 Windows 用户、以同一权限级别启动。"
+                else:
+                    errors["no_key"] = "已读取微信进程数据，但未找到能解开所选数据库的密钥。先核对账号和目录；如需重试，可手动完全退出微信、重新打开并登录，再点扫描。"
             raise SourceError(errors.get(data["error"], "扫描库加载或调用失败，请检查扫描库与系统架构"))
         if kind == "database":
             if data.get("account") and data["account"] != selection.account:
