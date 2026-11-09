@@ -1,10 +1,12 @@
 """Read WeChat 4 Windows databases directly using SQLCipher."""
 
 import hashlib
+import heapq
 import re
 import xml.etree.ElementTree as ET
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from functools import lru_cache
+from itertools import islice
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -53,46 +55,67 @@ class SqlCipherReader:
     def sessions(self, *, q="", limit=50):
         with self.open(self.root / "contact" / "contact.db") as db:
             rows = db.execute("""
-                SELECT username, COALESCE(NULLIF(remark,''), NULLIF(nick_name,''), username) AS title
+                SELECT username, remark, nick_name,
+                       COALESCE(NULLIF(remark,''), NULLIF(nick_name,''), username) AS title
                 FROM contact WHERE username LIKE '%@chatroom'
             """).fetchall()
-        matches = [row for row in rows if q.casefold() in row["title"].casefold() or q in row["username"]]
-        matches.sort(key=lambda row: (row["title"], row["username"]))
+        matches = [row for row in rows if any(q.casefold() in (row[field] or "").casefold()
+                                             for field in ("remark", "nick_name", "username"))]
+        matches.sort(key=lambda row: (row["title"], row["nick_name"] or "", row["username"]))
         return {
             "items": [
-                {"sessionId": row["username"], "displayName": row["title"], "kind": "group"}
+                {"sessionId": row["username"], "displayName": row["title"], "kind": "group",
+                 "original_name": row["nick_name"] or "", "remark": row["remark"] or ""}
                 for row in matches[:limit]
             ],
             "hasMore": len(matches) > limit,
         }
 
-    def conversations(self, *, q: str, kind: str, offset: int, limit: int):
-        with self.open(self.root / "session" / "session.db") as db:
-            sessions = db.execute(
-                "SELECT username, last_timestamp FROM SessionTable ORDER BY sort_timestamp DESC, username"
-            ).fetchall()
+    def conversation_details(self, session_ids: list[str]) -> dict:
+        if not session_ids:
+            return {}
+        placeholders = ",".join("?" for _ in session_ids)
         with self.open(self.root / "contact" / "contact.db") as db:
-            names = dict(db.execute("""
-                SELECT username, COALESCE(NULLIF(remark,''), NULLIF(nick_name,''), username)
-                FROM contact
-            """).fetchall())
+            rows = db.execute(
+                f"SELECT username, remark, nick_name FROM contact WHERE username IN ({placeholders})",
+                session_ids,
+            ).fetchall()
+        return {row["username"]: {
+            "original_name": row["nick_name"] or "", "remark": row["remark"] or "",
+        } for row in rows}
+
+    def conversations(self, *, q: str, kind: str, offset: int, limit: int):
         matches = []
+        skipped = 0
         search = q.casefold()
-        for row in sessions:
-            username = row["username"] or ""
-            group = username.endswith("@chatroom")
-            if not username or username.startswith("gh_") or username == "brandsessionholder":
-                continue
-            if kind != "all" and group != (kind == "group"):
-                continue
-            title = names.get(username) or username
-            if search not in title.casefold() and search not in username.casefold():
-                continue
-            matches.append({
-                "id": username, "name": title, "kind": "group" if group else "private",
-                "timestamp_ms": (row["last_timestamp"] or 0) * 1000,
-            })
-        return {"items": matches[offset:offset + limit], "has_more": len(matches) > offset + limit}
+        with self.open(self.root / "session" / "session.db") as db:
+            sessions = db.execute("""
+                SELECT username, last_timestamp FROM SessionTable
+                WHERE username <> '' AND substr(username, 1, 3) <> 'gh_'
+                  AND username <> 'brandsessionholder'
+                  AND (? = 'all' OR (username LIKE '%@chatroom') = (? = 'group'))
+                ORDER BY sort_timestamp DESC, username
+            """, (kind, kind))
+            while rows := sessions.fetchmany(100):
+                contacts = self.conversation_details([row["username"] for row in rows])
+                for row in rows:
+                    username = row["username"]
+                    details = contacts.get(username, {})
+                    original = details.get("original_name", "")
+                    remark = details.get("remark", "")
+                    if not any(search in value.casefold() for value in (username, original, remark)):
+                        continue
+                    if skipped < offset:
+                        skipped += 1
+                        continue
+                    if len(matches) == limit:
+                        return {"items": matches, "has_more": True}
+                    matches.append({
+                        "id": username, "name": remark or original or username,
+                        "kind": "group" if username.endswith("@chatroom") else "private",
+                        "timestamp_ms": (row["last_timestamp"] or 0) * 1000,
+                    })
+        return {"items": matches, "has_more": False}
 
     def history(self, session_id: str, *, offset: int, limit: int):
         items = self.messages(session_id, offset=offset, limit=limit + 1)["items"]
@@ -114,24 +137,31 @@ class SqlCipherReader:
 
     def messages(self, session_id: str, *, offset=0, limit=1, **filters):
         table = "Msg_" + hashlib.md5(session_id.encode(), usedforsecurity=False).hexdigest()
-        rows = []
         shards = sorted((self.root / "message").glob("message_*.db"))
         shards = [path for path in shards if re.fullmatch(r"message_\d+\.db", path.name)]
         if not shards:
             raise SourceError("未找到微信消息分库")
-        for path in shards:
-            with self.open(path) as db:
+        def tagged_rows(cursor, shard):
+            for row in cursor:
+                yield row, shard
+
+        with ExitStack() as stack:
+            streams = []
+            for path in shards:
+                db = stack.enter_context(self.open(path))
                 if not db.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
                     continue
-                for row in db.execute(f"""
+                cursor = db.execute(f"""
                     SELECT m.local_id, m.sort_seq, m.create_time, m.local_type,
                            m.message_content, n.user_name
                     FROM "{table}" AS m LEFT JOIN Name2Id AS n ON n.rowid=m.real_sender_id
                     ORDER BY m.sort_seq DESC, m.local_id DESC LIMIT ?
-                """, (offset + limit,)):
-                    rows.append((row, path.stem))
-        rows.sort(key=lambda pair: (pair[0]["sort_seq"], pair[0]["local_id"], pair[1]), reverse=True)
-        return {"items": [self.message(row, shard) for row, shard in rows[offset:offset + limit]]}
+                """, (offset + limit,))
+                streams.append(tagged_rows(cursor, path.stem))
+            merged = heapq.merge(
+                *streams, key=lambda pair: (pair[0]["sort_seq"], pair[0]["local_id"], pair[1]), reverse=True,
+            )
+            return {"items": [self.message(row, shard) for row, shard in islice(merged, offset, offset + limit)]}
 
     def message(self, row, shard):
         sender = row["user_name"]

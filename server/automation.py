@@ -9,10 +9,15 @@ from typing import Literal
 
 from pydantic import HttpUrl, model_validator
 
-from .plugins import HANDLERS, WebhookError, call_webhook
+from .plugins import HANDLERS, PLUGINS, WebhookError, call_webhook
 from .reply import ContractModel, MessageEvent, NonEmpty, SendTask
 
 log = structlog.get_logger("wechat_bot.automation")
+MAX_MONITORED_GROUPS = 10
+
+
+class GroupLimitError(ValueError):
+    pass
 
 
 class Rule(ContractModel):
@@ -75,6 +80,10 @@ class Automation:
                 CREATE TABLE IF NOT EXISTS monitored_groups (
                     group_id TEXT PRIMARY KEY, name TEXT NOT NULL, enabled INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS group_plugins (
+                    group_id TEXT NOT NULL, plugin_id TEXT NOT NULL, enabled INTEGER NOT NULL,
+                    PRIMARY KEY(group_id, plugin_id)
+                );
                 CREATE TABLE IF NOT EXISTS automation_migrations (name TEXT PRIMARY KEY);
                 INSERT OR IGNORE INTO monitored_groups(group_id, name, enabled)
                     SELECT group_id, group_id, 1 FROM rules
@@ -82,8 +91,13 @@ class Automation:
                         SELECT 1 FROM automation_migrations WHERE name='separate_monitored_groups'
                     )
                     AND json_extract(config, '$.enabled') = 1
-                    AND group_id LIKE '%@chatroom';
+                    AND group_id LIKE '%@chatroom'
+                    GROUP BY group_id ORDER BY group_id LIMIT 10;
                 INSERT OR IGNORE INTO automation_migrations VALUES ('separate_monitored_groups');
+                UPDATE monitored_groups SET enabled=0 WHERE group_id IN (
+                    SELECT group_id FROM monitored_groups WHERE enabled=1
+                    ORDER BY group_id LIMIT -1 OFFSET 10
+                );
                 CREATE TABLE IF NOT EXISTS delivery_inputs (
                     id INTEGER PRIMARY KEY, event TEXT NOT NULL, rule TEXT NOT NULL
                 );
@@ -109,9 +123,27 @@ class Automation:
 
     def set_group_monitoring(self, group_id: str, name: str, enabled: bool):
         with self.database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if enabled and db.execute(
+                "SELECT COUNT(*) FROM monitored_groups WHERE enabled=1 AND group_id<>?", (group_id,),
+            ).fetchone()[0] >= MAX_MONITORED_GROUPS:
+                raise GroupLimitError("最多同时监听 10 个群，请先暂停一个群")
             db.execute(
                 "INSERT INTO monitored_groups VALUES (?, ?, ?) ON CONFLICT(group_id) "
                 "DO UPDATE SET name=excluded.name, enabled=excluded.enabled", (group_id, name, enabled),
+            )
+
+    def group_plugins(self, group_id: str) -> dict[str, bool]:
+        with self.database() as db:
+            return {row["plugin_id"]: bool(row["enabled"]) for row in db.execute(
+                "SELECT plugin_id, enabled FROM group_plugins WHERE group_id=?", (group_id,),
+            )}
+
+    def set_group_plugin(self, group_id: str, plugin_id: str, enabled: bool):
+        with self.database() as db:
+            db.execute(
+                "INSERT INTO group_plugins VALUES (?,?,?) ON CONFLICT(group_id, plugin_id) "
+                "DO UPDATE SET enabled=excluded.enabled", (group_id, plugin_id, enabled),
             )
 
     def set_monitoring(self, enabled: bool, interval_seconds: int | None = None):
@@ -168,6 +200,13 @@ class Automation:
                 return "unmatched"
             rule = Rule.model_validate_json(row["config"])
             if not rule.enabled:
+                return "unmatched"
+            plugin = db.execute(
+                "SELECT enabled FROM group_plugins WHERE group_id=? AND plugin_id=?",
+                (event.group_id, rule.handler),
+            ).fetchone()
+            enabled = bool(plugin["enabled"]) if plugin is not None else PLUGINS[rule.handler]["default_enabled"]
+            if not enabled:
                 return "unmatched"
             inserted = db.execute(
                 "INSERT INTO deliveries(group_id,message_id,handler,status) VALUES (?,?,?,'processing') "

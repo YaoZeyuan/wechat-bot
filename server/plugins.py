@@ -26,6 +26,12 @@ HANDLERS: dict[str, Callable[[MessageEvent], Reply | None]] = {
     "fixed_reply": fixed_reply,
 }
 
+# Stable plugin IDs are shared by rules, the catalog and group overrides.
+PLUGINS = {
+    "fixed_reply": {"name": "测试消息", "description": "回复预设测试文本", "default_enabled": True},
+    "webhook": {"name": "HTTP 回调", "description": "把命中的消息交给独立 HTTP 服务", "default_enabled": False},
+}
+
 
 def call_webhook(url: HttpUrl, event: MessageEvent, delivery_id: str) -> Reply | None:
     """POST a matched event; 204 acknowledges it without creating a reply."""

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { api, type Conversation, type HistoryMessage } from './api'
+import { useRoute } from 'vue-router'
+import { api, type Conversation, type ConversationDetails, type HistoryMessage } from './api'
 
 const filters = [
   { key: 'all', label: '全部' }, { key: 'private', label: '联系人' }, { key: 'group', label: '群聊' },
@@ -9,6 +10,11 @@ const query = ref('')
 const kind = ref('all')
 const conversations = ref<Conversation[]>([])
 const selected = ref<Conversation>()
+const route = useRoute()
+const detailsVisible = ref(false)
+const details = ref<ConversationDetails>()
+const detailsError = ref('')
+let detailsVersion = 0
 const messages = ref<HistoryMessage[]>([])
 const timeline = ref<HTMLElement>()
 const moreConversations = ref(false)
@@ -67,6 +73,8 @@ async function openConversation(conversation: Conversation, append = false) {
   const previousHeight = timeline.value?.scrollHeight ?? 0
   const previousTop = timeline.value?.scrollTop ?? 0
   if (!append) {
+    detailsVisible.value = false
+    detailsVersion++
     messages.value = []
     messageOffset = 0
     moreMessages.value = false
@@ -89,7 +97,31 @@ async function openConversation(conversation: Conversation, append = false) {
   }
 }
 
-onMounted(() => loadConversations())
+async function showDetails() {
+  if (!selected.value) return
+  const version = ++detailsVersion
+  detailsVisible.value = true
+  details.value = undefined
+  detailsError.value = ''
+  try {
+    const result = await api.conversationDetails(selected.value.id)
+    if (version === detailsVersion) details.value = result
+  } catch (error) {
+    if (version === detailsVersion) detailsError.value = (error as Error).message
+  }
+}
+
+onMounted(async () => {
+  void loadConversations()
+  const id = route.query.session
+  if (typeof id !== 'string' || !id) return
+  try {
+    const result = await api.conversationDetails(id)
+    if (!selected.value) await openConversation({ ...result, timestamp_ms: 0 })
+  } catch (error) {
+    if (!selected.value) messageError.value = (error as Error).message
+  }
+})
 </script>
 
 <template>
@@ -128,7 +160,10 @@ onMounted(() => loadConversations())
         <template v-if="selected">
           <header class="chat-header">
             <div><h2>{{ selected.name }}</h2><small>{{ selected.id }}</small></div>
-            <a-button :loading="messagesBusy" @click="openConversation(selected)">刷新</a-button>
+            <div class="chat-actions">
+              <a-button @click="showDetails">详情</a-button>
+              <a-button :loading="messagesBusy" @click="openConversation(selected)">刷新</a-button>
+            </div>
           </header>
           <a-alert v-if="messageError" type="error">{{ messageError }}</a-alert>
           <div ref="timeline" class="timeline">
@@ -153,9 +188,18 @@ onMounted(() => loadConversations())
             </article>
           </div>
         </template>
-        <div v-else class="empty-chat">从会话列表选择联系人或群聊查看消息。</div>
+        <div v-else class="empty-chat">{{ messageError || '从会话列表选择联系人或群聊查看消息。' }}</div>
       </section>
     </div>
+    <a-modal v-model:visible="detailsVisible" title="会话详情" :footer="false">
+      <a-alert v-if="detailsError" type="error">{{ detailsError }}</a-alert>
+      <dl v-else-if="details" class="details">
+        <dt>{{ details.kind === 'group' ? '群名' : '昵称' }}</dt><dd>{{ details.original_name || '未记录' }}</dd>
+        <dt>备注名</dt><dd>{{ details.remark || '未设置' }}</dd>
+        <dt>{{ details.kind === 'group' ? '群 ID' : '用户 ID' }}</dt><dd>{{ details.id }}</dd>
+      </dl>
+      <p v-else role="status">正在读取详情…</p>
+    </a-modal>
   </main>
 </template>
 
@@ -183,6 +227,9 @@ small { color: var(--color-text-3); }
 .chat-header { padding: 12px 18px; background: var(--color-bg-2); border-bottom: 1px solid var(--color-border-2); }
 .chat-header div { min-width: 0; overflow-wrap: anywhere; }
 .chat-header h2 { margin: 0; }
+.chat-actions { display: flex; gap: 8px; }
+.details { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; }
+.details dd { margin: 0; overflow-wrap: anywhere; }
 .timeline { flex: 1; overflow: auto; padding: 18px; }
 .older { display: block; margin: 0 auto 12px; }
 .message-row { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 14px; }

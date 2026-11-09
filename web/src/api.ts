@@ -42,6 +42,23 @@ export interface MonitoredGroup {
   group_id: string
   name: string
   enabled: boolean
+  original_name?: string
+  remark?: string
+}
+
+export interface ConversationDetails {
+  id: string
+  name: string
+  kind: 'private' | 'group'
+  original_name: string
+  remark: string
+}
+
+export interface GroupPlugin {
+  id: string
+  name: string
+  description: string
+  enabled: boolean
 }
 
 interface Delivery {
@@ -83,11 +100,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  conversationDetails: (session_id: string) =>
+    request<ConversationDetails>(`/reader/history/details?${new URLSearchParams({ session_id })}`),
+  groupPlugins: (groupId: string) =>
+    request<GroupPlugin[]>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins`),
+  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean) =>
+    request<GroupPlugin>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins/${encodeURIComponent(pluginId)}`, {
+      method: 'PUT', body: JSON.stringify({ enabled }),
+    }),
   monitoredGroups: () => request<MonitoredGroup[]>('/reader/monitored-groups'),
   saveMonitoredGroup: (group: MonitoredGroup) =>
     request<MonitoredGroup>('/reader/monitored-groups', { method: 'PUT', body: JSON.stringify(group) }),
   monitorGroups: (q: string) =>
-    request<{ items: { sessionId: string; displayName: string }[]; hasMore: boolean }>(
+    request<{ items: { sessionId: string; displayName: string; original_name: string; remark: string }[]; hasMore: boolean }>(
       `/reader/groups?${new URLSearchParams({ q })}`,
     ),
   conversations: (q: string, kind: string, offset: number) =>

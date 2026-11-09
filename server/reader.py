@@ -21,8 +21,8 @@ from pydantic import BaseModel, Field, SecretStr
 from .ciphertalk import CipherTalk, SourceError
 from .sqlcipher_reader import SqlCipherReader
 from .ciphertalk_cli import CipherTalkCLI
-from .automation import Automation, Rule
-from .plugins import HANDLERS
+from .automation import Automation, GroupLimitError, MAX_MONITORED_GROUPS, Rule
+from .plugins import HANDLERS, PLUGINS
 from .polling import incoming_text, message_id, poll_group
 from .reply import MessageEvent, SendTask
 
@@ -315,18 +315,71 @@ class GroupMonitoring(BaseModel):
     group_id: str = Field(min_length=1, max_length=256, pattern=r"^[^\s]+@chatroom$")
     name: str = Field(min_length=1, max_length=256)
     enabled: bool
+    original_name: str = ""
+    remark: str = ""
 
 
 @router.get("/monitored-groups", response_model=list[GroupMonitoring])
 def list_monitored_groups():
-    return automation.monitored_groups()
+    groups = automation.monitored_groups()
+    if not groups:
+        return []
+    try:
+        details = history_source().conversation_details([group["group_id"] for group in groups])
+    except SourceError as exc:
+        log.warning("chat_history_read_failed", area="group_metadata", error=str(exc))
+        return groups
+    for group in groups:
+        group.update(details.get(group["group_id"], {}))
+        group["name"] = group.get("remark") or group.get("original_name") or group["name"]
+    return sorted(groups, key=lambda group: (group["name"].casefold(), group.get("original_name", "").casefold(), group["group_id"]))
 
 
 @router.put("/monitored-groups")
 def update_monitored_group(group: GroupMonitoring) -> GroupMonitoring:
-    automation.set_group_monitoring(group.group_id, group.name, group.enabled)
+    try:
+        automation.set_group_monitoring(group.group_id, group.name, group.enabled)
+    except GroupLimitError as exc:
+        log.warning("desktop_group_limit_reached", limit=MAX_MONITORED_GROUPS)
+        raise HTTPException(409, str(exc)) from None
     log.info("desktop_group_monitoring_changed", group_id=group.group_id, enabled=group.enabled)
     return group
+
+
+class GroupPluginSettings(BaseModel):
+    enabled: bool
+
+
+@router.get("/monitored-groups/{group_id}/plugins")
+def list_group_plugins(group_id: str) -> list[dict]:
+    settings = automation.group_plugins(group_id)
+    return [{"id": plugin_id, **meta, "enabled": settings.get(plugin_id, meta["default_enabled"])}
+            for plugin_id, meta in PLUGINS.items()]
+
+
+@router.put("/monitored-groups/{group_id}/plugins/{plugin_id}")
+def update_group_plugin(group_id: str, plugin_id: str, settings: GroupPluginSettings) -> dict:
+    if plugin_id not in PLUGINS or not any(item["group_id"] == group_id for item in automation.monitored_groups()):
+        raise HTTPException(404, "未找到所选群或插件")
+    automation.set_group_plugin(group_id, plugin_id, settings.enabled)
+    log.info("desktop_group_plugin_changed", group_id=group_id, plugin_id=plugin_id, enabled=settings.enabled)
+    return {"id": plugin_id, **PLUGINS[plugin_id], "enabled": settings.enabled}
+
+
+@router.get("/history/details")
+def browse_details(session_id: str = Query(min_length=1, max_length=256)) -> dict:
+    try:
+        details = history_source().conversation_details([session_id]).get(session_id, {})
+    except SourceError as exc:
+        log.warning("chat_history_read_failed", area="details", error=str(exc))
+        raise HTTPException(502, str(exc)) from None
+    original = details.get("original_name", "")
+    remark = details.get("remark", "")
+    log.info("chat_history_read", area="details", count=int(bool(details)))
+    return {
+        "id": session_id, "kind": "group" if session_id.endswith("@chatroom") else "private",
+        "original_name": original, "remark": remark, "name": remark or original or session_id,
+    }
 
 
 @router.get("/history/conversations")

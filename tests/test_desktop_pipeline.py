@@ -10,7 +10,7 @@ from sqlcipher3 import dbapi2
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from server.automation import Automation, Rule
+from server.automation import Automation, GroupLimitError, Rule
 from server import reader
 from server import export_history
 from server.polling import poll_group
@@ -21,6 +21,33 @@ from server.wechat_scan_worker import image_template
 
 
 class DesktopPipelineTest(unittest.TestCase):
+    def test_group_limit_and_plugin_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = Automation(Path(tmp) / "automation.db")
+            for number in range(10):
+                bot.set_group_monitoring(f"{number}@chatroom", "fixture", True)
+            with self.assertRaises(GroupLimitError):
+                bot.set_group_monitoring("10@chatroom", "fixture", True)
+            bot.set_group_monitoring("0@chatroom", "fixture", False)
+            bot.set_group_monitoring("10@chatroom", "fixture", True)
+            for group in ("1@chatroom", "2@chatroom"):
+                bot.save_rule(Rule(group_id=group, keyword="test"))
+            bot.set_group_plugin("1@chatroom", "fixed_reply", False)
+            from server.reply import MessageEvent
+            event = MessageEvent(group_id="1@chatroom", message_id="1", sender_id="sender",
+                                 timestamp_ms=1, text="test")
+            self.assertEqual(bot.dispatch(event), "unmatched")
+            self.assertEqual(bot.dispatch(event.model_copy(update={"group_id": "2@chatroom"})), "pending")
+            bot.save_rule(Rule(group_id="2@chatroom", keyword="hook", handler="webhook",
+                               url="http://127.0.0.1:1/hook"))
+            hook_event = event.model_copy(update={"group_id": "2@chatroom", "message_id": "2", "text": "hook"})
+            with patch("server.automation.call_webhook", return_value=None) as hook:
+                self.assertEqual(bot.dispatch(hook_event), "unmatched")
+                hook.assert_not_called()
+                bot.set_group_plugin("2@chatroom", "webhook", True)
+                self.assertEqual(bot.dispatch(hook_event), "acknowledged")
+                hook.assert_called_once()
+
     def test_group_monitoring_is_independent_from_keyword_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "automation.db"

@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { api, type KeywordRule, type MonitoredGroup } from './api'
+import { useRoute, useRouter } from 'vue-router'
+import { api, type GroupPlugin, type KeywordRule, type MonitoredGroup } from './api'
 import { selectedReaderGroup as selected } from './readerSelection'
 
-const rule = ref<KeywordRule>({ group_id: selected.value, keyword: '', handler: 'fixed_reply', url: null, enabled: true })
+const route = useRoute()
+const router = useRouter()
+const initialGroup = typeof route.query.group === 'string' ? route.query.group : selected.value
+const rule = ref<KeywordRule>({ group_id: initialGroup, keyword: '', handler: 'fixed_reply', url: null, enabled: true })
 const rules = ref<KeywordRule[]>([])
 const handlers = ref<string[]>([])
 const deliveries = ref<Awaited<ReturnType<typeof api.readerDeliveries>>['items']>([])
@@ -15,13 +19,15 @@ const preview = ref<Awaited<ReturnType<typeof api.previewReaderRule>>>()
 const monitoring = ref<Awaited<ReturnType<typeof api.readerStatus>>>()
 const interval = ref<number | ''>()
 const groupQuery = ref('')
-const groupMatches = ref<{ sessionId: string; displayName: string }[]>([])
+const groupMatches = ref<Awaited<ReturnType<typeof api.monitorGroups>>['items']>([])
 const groupSearchMessage = ref('')
 const monitored = ref<MonitoredGroup[]>([])
 const editing = ref(false)
 const currentGroup = computed(() => monitored.value.find(group => group.group_id === rule.value.group_id))
 const currentRules = computed(() => rules.value.filter(item => item.group_id === rule.value.group_id))
 const enabledCount = computed(() => monitored.value.filter(group => group.enabled).length)
+const plugins = ref<GroupPlugin[]>([])
+const pluginError = ref('')
 const refreshError = ref('')
 let refreshTimer: number | undefined
 let refreshing = false
@@ -30,6 +36,7 @@ function selectGroup(id: string) {
   rule.value = { group_id: id, keyword: '', handler: 'fixed_reply', url: null, enabled: true }
   editing.value = false
   preview.value = undefined
+  if (route.query.group !== id) void router.replace({ path: '/rules', query: { group: id } })
 }
 
 function editRule(item: KeywordRule) {
@@ -39,6 +46,33 @@ function editRule(item: KeywordRule) {
 }
 
 watch(selected, (id) => { if (id) selectGroup(id) })
+watch(() => route.query.group, (id) => {
+  if (typeof id === 'string' && id !== rule.value.group_id) selectGroup(id)
+})
+watch(() => currentGroup.value?.group_id, async (id, _, onCleanup) => {
+  let stale = false
+  onCleanup(() => { stale = true })
+  plugins.value = []
+  pluginError.value = ''
+  if (!id) return
+  try {
+    const result = await api.groupPlugins(id)
+    if (!stale) plugins.value = result
+  } catch (err) {
+    if (!stale) pluginError.value = (err as Error).message
+  }
+}, { immediate: true })
+
+function togglePlugin(plugin: GroupPlugin) {
+  const id = currentGroup.value?.group_id
+  if (!id) return
+  return run(async () => {
+    const updated = await api.saveGroupPlugin(id, plugin.id, !plugin.enabled)
+    if (currentGroup.value?.group_id === id) {
+      plugins.value = plugins.value.map(item => item.id === updated.id ? updated : item)
+    }
+  })
+}
 
 async function load() {
   const [config, runs, status, groupSettings] = await Promise.all([
@@ -190,7 +224,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
           <a-button :type="monitoring.enabled ? 'secondary' : 'primary'" :disabled="busy || (!monitoring.enabled && !enabledCount)"
             @click="toggleMonitoring">{{ monitoring.enabled ? '停止监听' : '启动监听' }}</a-button>
         </form>
-        <p class="muted">当前每 {{ monitoring.interval_seconds }} 秒读取一次 · {{ enabledCount }} 个群已启用</p>
+        <p class="muted">当前每 {{ monitoring.interval_seconds }} 秒读取一次 · 已启用 {{ enabledCount }} / 10 个群</p>
         <p v-if="monitoring.last_success_at" class="muted">最近成功读取 {{ new Date(monitoring.last_success_at).toLocaleString() }}</p>
         <a-alert v-if="monitoring.error" type="error">{{ monitoring.error }}</a-alert>
       </template>
@@ -207,7 +241,10 @@ onUnmounted(() => window.clearInterval(refreshTimer))
         <p v-if="groupSearchMessage" class="muted">{{ groupSearchMessage }}</p>
         <ul v-if="groupMatches.length" class="compact-list search-results">
           <li v-for="group in groupMatches" :key="group.sessionId">
-            <div class="identity"><strong>{{ group.displayName }}</strong><small>{{ group.sessionId }}</small></div>
+            <div class="identity"><strong>{{ group.displayName }}</strong>
+              <small v-if="group.remark && group.original_name && group.original_name !== group.remark">{{ group.original_name }}</small>
+              <small>{{ group.sessionId }}</small>
+            </div>
             <a-button size="small" :disabled="busy || monitored.some(item => item.group_id === group.sessionId && item.enabled)"
               @click="setGroup(group.sessionId, group.displayName, true)">启用</a-button>
           </li>
@@ -217,7 +254,9 @@ onUnmounted(() => window.clearInterval(refreshTimer))
           <li v-for="group in monitored" :key="group.group_id" :class="{ chosen: currentGroup?.group_id === group.group_id }">
             <button type="button" class="group-select identity" :aria-pressed="currentGroup?.group_id === group.group_id"
               :disabled="busy" @click="selectGroup(group.group_id)">
-              <strong>{{ group.name }}</strong><small>{{ group.group_id }}</small>
+              <strong>{{ group.remark || group.original_name || group.name }}</strong>
+              <small v-if="group.remark && group.original_name && group.original_name !== group.remark">{{ group.original_name }}</small>
+              <small>{{ group.group_id }}</small>
             </button>
             <a-tag :color="group.enabled ? 'green' : 'gray'">{{ group.enabled ? '启用' : '暂停' }}</a-tag>
           </li>
@@ -233,11 +272,27 @@ onUnmounted(() => window.clearInterval(refreshTimer))
           </a-button>
         </div>
         <template v-if="currentGroup">
-          <p class="group-context"><strong>{{ currentGroup.name }}</strong><small>{{ currentGroup.group_id }}</small></p>
+          <div class="group-context">
+            <strong>{{ currentGroup.remark || currentGroup.original_name || currentGroup.name }}</strong>
+            <small v-if="currentGroup.remark && currentGroup.original_name && currentGroup.original_name !== currentGroup.remark">{{ currentGroup.original_name }}</small>
+            <small>{{ currentGroup.group_id }}</small>
+            <RouterLink :to="{ path: '/history', query: { session: currentGroup.group_id } }">查看群聊记录</RouterLink>
+          </div>
+          <h3>此群的插件</h3>
+          <a-alert v-if="pluginError" type="error">{{ pluginError }}</a-alert>
+          <ul v-if="plugins.length" class="compact-list">
+            <li v-for="plugin in plugins" :key="plugin.id">
+              <div class="identity"><strong>{{ plugin.name }}</strong><small>{{ plugin.description }}</small></div>
+              <a-tag :color="plugin.enabled ? 'green' : 'gray'">{{ plugin.enabled ? '启用' : '停用' }}</a-tag>
+              <a-button size="small" :disabled="busy" @click="togglePlugin(plugin)">{{ plugin.enabled ? '停用' : '启用' }}</a-button>
+            </li>
+          </ul>
+          <h3>触发规则</h3>
           <ul v-if="currentRules.length" class="compact-list">
             <li v-for="item in currentRules" :key="item.keyword">
-              <div class="identity"><strong>{{ item.keyword }}</strong><small>{{ item.handler === 'webhook' ? 'HTTP 回调' : item.handler === 'fixed_reply' ? '固定回复' : item.handler }}</small></div>
-              <a-tag :color="item.enabled ? 'green' : 'gray'">{{ item.enabled ? '启用' : '停用' }}</a-tag>
+              <div class="identity"><strong>{{ item.keyword }}</strong><small>{{ plugins.find(plugin => plugin.id === item.handler)?.name || item.handler }}</small></div>
+              <a-tag v-if="item.enabled && plugins.some(plugin => plugin.id === item.handler && !plugin.enabled)" color="gray">插件停用</a-tag>
+              <a-tag v-else :color="item.enabled ? 'green' : 'gray'">{{ item.enabled ? '启用' : '停用' }}</a-tag>
               <a-button size="small" :disabled="busy" @click="editRule(item)">编辑</a-button>
             </li>
           </ul>
@@ -252,7 +307,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
             <label>命中后的动作
               <select v-model="rule.handler">
                 <option v-for="handler in handlers" :key="handler" :value="handler">
-                  {{ handler === 'webhook' ? 'HTTP 回调' : handler === 'fixed_reply' ? '固定回复 · 测试成功' : handler }}
+                  {{ plugins.find(plugin => plugin.id === handler)?.name || handler }}
                 </option>
               </select>
             </label>
