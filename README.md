@@ -207,3 +207,13 @@ Windows 手动取钥需要在后端启用 `WECHAT_BOT_KEY_EXTRACTION=1`，并提
 ```sh
 uv run python -m server.export_history --snapshot local-data/snapshot --account wxid_example --group "群名" --output local-data/history.jsonl
 ```
+
+## 参考项目与致谢
+
+感谢这些项目公开源码和设计，让本项目有了可以对照的实现。
+
+- [CipherTalk（密语）](https://github.com/ILoveBingLu/CipherTalk) 与 [CipherTalk-Backup](https://github.com/Nixer-2301/CipherTalk-Backup)（[本项目使用的 fork](https://github.com/YaoZeyuan/CipherTalk-Backup)）。参考了账号初始化、数据库和图片密钥流程，以及聊天记录展示。
+- [FlowBot](https://github.com/xlrpa/FlowBot)。参考了安卓执行端与电脑端任务调度的分工。
+- [AstrBot](https://github.com/AstrBotDevs/AstrBot)。参考了消息事件、关键词指令和插件处理函数的分层。
+- [MaiBot（麦麦）](https://github.com/Mai-with-u/MaiBot)。参考了 WebUI 将运行状态、配置和执行记录分区的方式。
+- [Arco Design Vue](https://github.com/arco-design/arco-design-vue)。用于后台导航及界面组件。
