@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { api, type GroupPlugin, type KeywordRule, type MonitoredGroup } from './api'
-import { selectedReaderGroup as selected } from './readerSelection'
 
 const route = useRoute()
-const router = useRouter()
-const initialGroup = typeof route.query.group === 'string' ? route.query.group : selected.value
+const groupId = computed(() => typeof route.query.group === 'string' ? route.query.group : '')
+const initialGroup = groupId.value
 const rule = ref<KeywordRule>({ group_id: initialGroup, keyword: '', handler: 'fixed_reply', url: null, enabled: true })
 const rules = ref<KeywordRule[]>([])
 const handlers = ref<string[]>([])
@@ -18,13 +17,11 @@ const sample = ref('测试')
 const preview = ref<Awaited<ReturnType<typeof api.previewReaderRule>>>()
 const monitoring = ref<Awaited<ReturnType<typeof api.readerStatus>>>()
 const interval = ref<number | ''>()
-const groupQuery = ref('')
-const groupMatches = ref<Awaited<ReturnType<typeof api.monitorGroups>>['items']>([])
-const groupSearchMessage = ref('')
 const monitored = ref<MonitoredGroup[]>([])
 const editing = ref(false)
 const currentGroup = computed(() => monitored.value.find(group => group.group_id === rule.value.group_id))
 const currentRules = computed(() => rules.value.filter(item => item.group_id === rule.value.group_id))
+const currentDeliveries = computed(() => deliveries.value.filter(item => item.group_id === groupId.value))
 const enabledCount = computed(() => monitored.value.filter(group => group.enabled).length)
 const plugins = ref<GroupPlugin[]>([])
 const pluginError = ref('')
@@ -36,7 +33,6 @@ function selectGroup(id: string) {
   rule.value = { group_id: id, keyword: '', handler: 'fixed_reply', url: null, enabled: true }
   editing.value = false
   preview.value = undefined
-  if (route.query.group !== id) void router.replace({ path: '/rules', query: { group: id } })
 }
 
 function editRule(item: KeywordRule) {
@@ -45,9 +41,8 @@ function editRule(item: KeywordRule) {
   preview.value = undefined
 }
 
-watch(selected, (id) => { if (id) selectGroup(id) })
-watch(() => route.query.group, (id) => {
-  if (typeof id === 'string' && id !== rule.value.group_id) selectGroup(id)
+watch(groupId, (id) => {
+  if (id !== rule.value.group_id) selectGroup(id)
 })
 watch(() => currentGroup.value?.group_id, async (id, _, onCleanup) => {
   let stale = false
@@ -84,7 +79,6 @@ async function load() {
   monitoring.value = status
   interval.value ??= status.interval_seconds
   monitored.value = groupSettings
-  if (!currentGroup.value && groupSettings.length) selectGroup(groupSettings[0]!.group_id)
 }
 
 async function run(action: () => Promise<void>) {
@@ -146,23 +140,10 @@ function saveInterval() {
   })
 }
 
-function searchGroups() {
-  return run(async () => {
-    groupMatches.value = []
-    groupSearchMessage.value = ''
-    const result = await api.monitorGroups(groupQuery.value.trim())
-    groupMatches.value = result.items
-    groupSearchMessage.value = result.items.length
-      ? (result.hasMore ? '仅显示前 50 个结果，请缩小搜索范围。' : '')
-      : '没有找到匹配的群聊。'
-  })
-}
-
 function setGroup(group_id: string, name: string, enabled: boolean) {
   return run(async () => {
     await api.saveMonitoredGroup({ group_id, name, enabled })
     monitored.value = await api.monitoredGroups()
-    if (enabled && !currentGroup.value) selectGroup(group_id)
     notice.value = enabled ? '已启用该群监听。' : '已暂停该群监听，群内规则仍保留。'
   })
 }
@@ -201,14 +182,15 @@ onUnmounted(() => window.clearInterval(refreshTimer))
 <template>
   <main class="page rules-page">
     <header class="page-heading">
-      <h1>规则与任务</h1>
-      <p>先设置读取频率，再选择监听群，为每个群配置消息触发动作。</p>
+      <RouterLink v-if="groupId" to="/rules">返回规则与任务</RouterLink>
+      <h1>{{ groupId ? '群机器人配置' : '规则与任务' }}</h1>
+      <p v-if="!groupId">设置全局读取频率，或从监听群列表进入群机器人配置。</p>
     </header>
 
     <a-alert v-if="error" type="error">{{ error }}</a-alert>
     <a-alert v-if="notice" type="success">{{ notice }}</a-alert>
 
-    <section class="card" aria-labelledby="global-heading">
+    <section v-if="!groupId" class="card" aria-labelledby="global-heading">
       <div class="card-head">
         <h2 id="global-heading">全局监听</h2>
         <a-tag v-if="monitoring" :color="monitoring.enabled ? 'green' : 'gray'">
@@ -231,39 +213,26 @@ onUnmounted(() => window.clearInterval(refreshTimer))
       <p v-else class="muted">正在读取监听设置…</p>
     </section>
 
-    <div class="configuration-grid">
-      <section class="card" aria-labelledby="groups-heading">
+      <section v-if="!groupId" class="card" aria-labelledby="groups-heading">
         <h2 id="groups-heading">监听群</h2>
-        <form class="search-form" @submit.prevent="searchGroups">
-          <input v-model="groupQuery" aria-label="搜索群聊" maxlength="100" placeholder="群名或群 ID" />
-          <a-button html-type="submit" :loading="busy">查找</a-button>
-        </form>
-        <p v-if="groupSearchMessage" class="muted">{{ groupSearchMessage }}</p>
-        <ul v-if="groupMatches.length" class="compact-list search-results">
-          <li v-for="group in groupMatches" :key="group.sessionId">
-            <div class="identity"><strong>{{ group.displayName }}</strong>
-              <small v-if="group.remark && group.original_name && group.original_name !== group.remark">{{ group.original_name }}</small>
-              <small>{{ group.sessionId }}</small>
-            </div>
-            <a-button size="small" :disabled="busy || monitored.some(item => item.group_id === group.sessionId && item.enabled)"
-              @click="setGroup(group.sessionId, group.displayName, true)">启用</a-button>
-          </li>
-        </ul>
-        <p v-if="!monitored.length" class="muted">还没有监听群。查找一个群并启用后，就可以为它配置规则。</p>
-        <ul v-else class="compact-list">
-          <li v-for="group in monitored" :key="group.group_id" :class="{ chosen: currentGroup?.group_id === group.group_id }">
-            <button type="button" class="group-select identity" :aria-pressed="currentGroup?.group_id === group.group_id"
-              :disabled="busy" @click="selectGroup(group.group_id)">
+        <p v-if="!monitored.length" class="muted">还没有监听群。请在聊天记录中打开一个群，点击「启用机器人」。</p>
+        <RouterLink to="/history">前往聊天记录</RouterLink>
+        <template v-if="monitored.length">
+        <ul class="compact-list">
+          <li v-for="group in monitored" :key="group.group_id">
+            <RouterLink class="identity" :to="{ path: '/rules', query: { group: group.group_id } }">
               <strong>{{ group.remark || group.original_name || group.name }}</strong>
               <small v-if="group.remark && group.original_name && group.original_name !== group.remark">{{ group.original_name }}</small>
               <small>{{ group.group_id }}</small>
-            </button>
+            </RouterLink>
             <a-tag :color="group.enabled ? 'green' : 'gray'">{{ group.enabled ? '启用' : '暂停' }}</a-tag>
+            <RouterLink :to="{ path: '/rules', query: { group: group.group_id } }">配置</RouterLink>
           </li>
         </ul>
+        </template>
       </section>
 
-      <section class="card" aria-labelledby="rules-heading">
+      <section v-else class="card" aria-labelledby="rules-heading">
         <div class="card-head">
           <h2 id="rules-heading">群内关键词规则</h2>
           <a-button v-if="currentGroup" size="small" :disabled="busy"
@@ -333,19 +302,18 @@ onUnmounted(() => window.clearInterval(refreshTimer))
             </div>
           </details>
         </template>
-        <p v-else class="muted">从左侧选择一个群，查看并配置它的规则。</p>
+        <p v-else class="muted">{{ busy ? '正在加载群配置…' : '没有找到该群配置。请先在聊天记录中为该群启用机器人。' }}</p>
       </section>
-    </div>
 
-    <section class="card" aria-labelledby="records-heading">
+    <section v-if="groupId && currentGroup" class="card" aria-labelledby="records-heading">
       <div class="card-head">
         <h2 id="records-heading">执行记录与待发送任务</h2>
         <a-button :disabled="busy" @click="run(load)">刷新</a-button>
       </div>
       <p v-if="refreshError" class="message error" role="status">自动刷新失败：{{ refreshError }}</p>
-      <p v-if="!deliveries.length" class="muted">暂无执行记录。</p>
+      <p v-if="!currentDeliveries.length" class="muted">暂无执行记录。</p>
       <ul v-else class="compact-list deliveries">
-        <li v-for="item in deliveries" :key="item.id">
+        <li v-for="item in currentDeliveries" :key="item.id">
           <div class="identity">
             <strong>{{ monitored.find(group => group.group_id === item.group_id)?.name || item.group_id }}</strong>
             <small>{{ item.created_at }} UTC · {{ item.handler }}</small>
@@ -368,22 +336,16 @@ onUnmounted(() => window.clearInterval(refreshTimer))
 .rules-page .card { margin: 0; min-width: 0; }
 .page-heading p, .muted, small { color: var(--color-text-3); }
 .page-heading p { margin: 4px 0 0; }
-.inline-form, .search-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.inline-form label, .inline-form input, .search-form input { margin: 0; }
+.inline-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.inline-form label, .inline-form input { margin: 0; }
 .inline-form input { width: 76px; }
-.search-form input { flex: 1; min-width: 120px; }
-.configuration-grid { display: grid; grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.5fr); gap: 16px; align-items: start; }
 .compact-list { list-style: none; margin: 12px 0 0; padding: 0; }
 .compact-list li { display: flex; align-items: center; gap: 8px; padding: 9px 8px; border-bottom: 1px solid var(--color-border-2); }
-.search-results { max-height: 260px; overflow: auto; }
 .identity { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .identity small, .group-context small { display: block; }
-.group-select { padding: 0; text-align: left; background: transparent; }
-.chosen { background: rgb(var(--primary-1)); border-radius: 6px; }
 .rule-form, .test-tools { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--color-border-2); }
 .rule-form select { display: block; margin-top: 4px; }
 .rule-form h3 { margin: 0 0 8px; }
 .test-tools summary { cursor: pointer; }
 .deliveries pre { max-width: 100%; overflow: auto; white-space: pre-wrap; }
-@media (max-width: 720px) { .configuration-grid { grid-template-columns: 1fr; } }
 </style>

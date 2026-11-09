@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, type Conversation, type ConversationDetails, type HistoryMessage } from './api'
+import { api, type Conversation, type ConversationDetails, type HistoryMessage, type MonitoredGroup } from './api'
 
 const filters = [
   { key: 'all', label: '全部' }, { key: 'private', label: '联系人' }, { key: 'group', label: '群聊' },
@@ -14,6 +14,12 @@ const route = useRoute()
 const detailsVisible = ref(false)
 const details = ref<ConversationDetails>()
 const detailsError = ref('')
+const robotGroups = ref<MonitoredGroup[]>()
+const robotBusy = ref(false)
+const robotError = ref('')
+const robotEnabled = computed(() => robotGroups.value?.some(group => group.group_id === selected.value?.id && group.enabled))
+const robotLimitReached = computed(() => !robotEnabled.value && (robotGroups.value?.filter(group => group.enabled).length ?? 0) >= 10)
+const robotLimitReason = '最多同时启用 10 个群机器人，请先在「规则与任务」暂停一个群。'
 let detailsVersion = 0
 const messages = ref<HistoryMessage[]>([])
 const timeline = ref<HTMLElement>()
@@ -73,6 +79,7 @@ async function openConversation(conversation: Conversation, append = false) {
   const previousHeight = timeline.value?.scrollHeight ?? 0
   const previousTop = timeline.value?.scrollTop ?? 0
   if (!append) {
+    if (conversation.kind === 'group') void loadRobotGroups()
     detailsVisible.value = false
     detailsVersion++
     messages.value = []
@@ -94,6 +101,31 @@ async function openConversation(conversation: Conversation, append = false) {
     if (version === messageVersion) messageError.value = (error as Error).message
   } finally {
     if (version === messageVersion) messagesBusy.value = false
+  }
+}
+
+async function loadRobotGroups() {
+  robotError.value = ''
+  try {
+    robotGroups.value = await api.monitoredGroups()
+  } catch (error) {
+    robotError.value = (error as Error).message
+  }
+}
+
+async function enableRobot() {
+  const group = selected.value
+  if (!group || group.kind !== 'group' || robotLimitReached.value || robotBusy.value) return
+  robotBusy.value = true
+  robotError.value = ''
+  try {
+    const saved = await api.saveMonitoredGroup({ group_id: group.id, name: group.name, enabled: true })
+    robotGroups.value = [...(robotGroups.value ?? []).filter(item => item.group_id !== saved.group_id), saved]
+  } catch (error) {
+    await loadRobotGroups()
+    robotError.value = (error as Error).message
+  } finally {
+    robotBusy.value = false
   }
 }
 
@@ -161,10 +193,20 @@ onMounted(async () => {
           <header class="chat-header">
             <div><h2>{{ selected.name }}</h2><small>{{ selected.id }}</small></div>
             <div class="chat-actions">
+              <template v-if="selected.kind === 'group'">
+                <RouterLink v-if="robotEnabled" :to="{ path: '/rules', query: { group: selected.id } }">配置机器人</RouterLink>
+                <template v-else>
+                  <a-button type="primary" :loading="robotBusy" :disabled="!robotGroups || robotLimitReached" @click="enableRobot">启用机器人</a-button>
+                  <span v-if="robotLimitReached" class="limit-help" tabindex="0" :aria-label="robotLimitReason">
+                    <span aria-hidden="true">?</span><span class="limit-tooltip" role="tooltip">{{ robotLimitReason }}</span>
+                  </span>
+                </template>
+              </template>
               <a-button @click="showDetails">详情</a-button>
               <a-button :loading="messagesBusy" @click="openConversation(selected)">刷新</a-button>
             </div>
           </header>
+          <a-alert v-if="selected.kind === 'group' && robotError" type="error">{{ robotError }}</a-alert>
           <a-alert v-if="messageError" type="error">{{ messageError }}</a-alert>
           <div ref="timeline" class="timeline">
             <a-button v-if="moreMessages" class="older" :loading="messagesBusy" @click="openConversation(selected, true)">加载更早消息</a-button>
@@ -227,7 +269,10 @@ small { color: var(--color-text-3); }
 .chat-header { padding: 12px 18px; background: var(--color-bg-2); border-bottom: 1px solid var(--color-border-2); }
 .chat-header div { min-width: 0; overflow-wrap: anywhere; }
 .chat-header h2 { margin: 0; }
-.chat-actions { display: flex; gap: 8px; }
+.chat-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.limit-help { position: relative; display: inline-grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--color-border-3); border-radius: 50%; cursor: help; }
+.limit-tooltip { display: none; position: absolute; z-index: 2; right: 0; top: 26px; width: 200px; padding: 8px; border-radius: 4px; color: white; background: #1d2129; }
+.limit-help:hover .limit-tooltip, .limit-help:focus .limit-tooltip { display: block; }
 .details { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; }
 .details dd { margin: 0; overflow-wrap: anywhere; }
 .timeline { flex: 1; overflow: auto; padding: 18px; }
