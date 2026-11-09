@@ -2,9 +2,11 @@
 
 import hashlib
 import re
+import xml.etree.ElementTree as ET
 from contextlib import closing, contextmanager
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .ciphertalk import SourceError
 from .ciphertalk_cli import CipherTalkCLI
@@ -134,24 +136,65 @@ class SqlCipherReader:
     def message(self, row, shard):
         sender = row["user_name"]
         content = row["message_content"]
-        if row["local_type"] == 1 and isinstance(content, bytes):
+        type_code = row["local_type"] & 0xFFFFFFFF
+        if type_code in (1, 49) and isinstance(content, bytes):
             if content.startswith(bytes.fromhex("28b52ffd")):
                 import zstandard
 
                 try:
                     content = zstandard.ZstdDecompressor().decompress(content, max_output_size=1024 * 1024)
                 except zstandard.ZstdError:
-                    raise SourceError("无法解压微信文本消息") from None
+                    if type_code == 1:
+                        raise SourceError("无法解压微信文本消息") from None
+                    content = b""
             content = content.decode("utf-8", errors="replace")
-        text = content if row["local_type"] == 1 and isinstance(content, str) else ""
-        if sender and text.startswith(sender + ":\n"):
-            text = text[len(sender) + 2:]
+        if isinstance(content, str) and sender and content.startswith(sender + ":\n"):
+            content = content[len(sender) + 2:]
+        card = self.app_card(content) if type_code == 49 and isinstance(content, str) else None
+        link = card if card and card.get("url") else None
         return {
             "messageId": f'{shard}:{row["local_id"]}',
             "timestampMs": row["create_time"] * 1000,
             "direction": "out" if sender == self.account else "in",
-            "kind": "text" if row["local_type"] == 1 else "other",
+            "kind": "text" if type_code == 1 else "link" if link else "other",
             "type_code": row["local_type"],
             "sender": {"username": sender},
-            "text": text,
+            "text": content if type_code == 1 and isinstance(content, str) else "",
+            "link": link,
+            "file_name": card["title"] if card and not link else None,
         }
+
+    @staticmethod
+    def app_card(content: str):
+        if len(content) > 1024 * 1024:
+            return None
+        try:
+            root = ET.fromstring(content.strip())
+            app = root if root.tag == "appmsg" else root.find("appmsg")
+            if app is None:
+                return None
+            kind = (app.findtext("type") or "").strip()
+            title = (app.findtext("title") or "").strip()[:300]
+            if kind == "6":
+                return {"title": title}
+            if kind not in {"4", "5"}:
+                return None
+            url = (app.findtext("url") or "").strip()
+            if not SqlCipherReader.is_web_url(url):
+                return None
+            cover = (app.findtext(".//coverpicimageurl") or "").strip()
+            return {
+                "url": url, "title": title,
+                "description": (app.findtext("des") or "").strip()[:600],
+                "source": (app.findtext("sourcedisplayname") or "").strip()[:120],
+                "cover": cover if SqlCipherReader.is_web_url(cover) else "",
+            }
+        except (ET.ParseError, ValueError):
+            return None
+
+    @staticmethod
+    def is_web_url(url: str) -> bool:
+        parts = urlsplit(url)
+        return parts.scheme in {"http", "https"} and bool(parts.hostname) and not any(
+            char.isspace() or ord(char) < 32 for char in url
+        )

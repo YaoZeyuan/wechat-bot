@@ -22,7 +22,9 @@ export interface HistoryMessage {
   messageId: string
   timestampMs: number
   direction: 'in' | 'out'
-  kind: 'text' | 'other'
+  kind: 'text' | 'link' | 'other'
+  link?: { url: string; title: string; description: string; source: string; cover: string } | null
+  file_name?: string | null
   type_code: number
   sender: { username: string | null; display_name: string | null }
   text: string

@@ -18,6 +18,7 @@ const messagesBusy = ref(false)
 const listError = ref('')
 const messageError = ref('')
 const ordered = computed(() => [...messages.value].reverse())
+const visibleCovers = ref(new Set<string>())
 let listVersion = 0
 let messageVersion = 0
 let messageOffset = 0
@@ -68,6 +69,7 @@ async function openConversation(conversation: Conversation, append = false) {
   const previousTop = timeline.value?.scrollTop ?? 0
   if (!append) {
     messages.value = []
+    visibleCovers.value.clear()
     messageOffset = 0
     moreMessages.value = false
   }
@@ -139,7 +141,19 @@ onMounted(() => loadConversations())
               :class="{ outgoing: message.direction === 'out' }">
               <small>{{ message.direction === 'out' ? '我' : message.sender.display_name || (selected.kind === 'private' ? selected.name : '未知发送者') }}
                 · {{ date(message.timestampMs) }}</small>
-              <div class="bubble">{{ content(message) }}</div>
+              <div class="bubble">
+                <a v-if="message.link" :href="message.link.url" target="_blank" rel="noopener noreferrer" class="shared-link">
+                  <img v-if="message.link.cover && visibleCovers.has(message.messageId)" :src="message.link.cover" alt="" loading="lazy" referrerpolicy="no-referrer" />
+                  <strong>{{ message.link.title || '网页链接' }}</strong>
+                  <span v-if="message.link.description" class="link-description">{{ message.link.description }}</span>
+                  <small v-if="message.link.source">{{ message.link.source }}</small>
+                  <small>{{ message.link.url }}</small>
+                </a>
+                <template v-else-if="message.file_name">[文件] {{ message.file_name }}</template>
+                <template v-else>{{ content(message) }}</template>
+                <a-button v-if="message.link?.cover && !visibleCovers.has(message.messageId)"
+                  type="text" size="mini" @click="visibleCovers.add(message.messageId)">加载网页封面</a-button>
+              </div>
             </article>
           </div>
         </template>
@@ -179,6 +193,9 @@ small { color: var(--color-text-3); }
 .message-row.outgoing { align-items: flex-end; }
 .bubble { max-width: 82%; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 12px; border-radius: 8px; background: var(--color-bg-2); }
 .outgoing .bubble { background: rgb(var(--primary-2)); }
+.shared-link { display: grid; gap: 4px; }
+.shared-link img { width: 100%; max-height: 160px; object-fit: cover; border-radius: 4px; }
+.link-description { color: var(--color-text-2); }
 .empty-chat { margin: auto; padding: 16px; color: var(--color-text-3); }
 @media (max-width: 650px) {
   .workspace { grid-template-columns: 1fr; grid-template-rows: minmax(110px, 27%) minmax(0, 1fr); height: max(540px, calc(100dvh - 190px)); }
