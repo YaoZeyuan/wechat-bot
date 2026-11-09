@@ -15,7 +15,7 @@ from typing import Literal
 from threading import Lock
 from tempfile import NamedTemporaryFile
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, SecretStr
 
 from .ciphertalk import CipherTalk, SourceError
@@ -276,6 +276,41 @@ def load_profile() -> StoredReaderProfile | None:
     except (OSError, ValueError):
         log.warning("reader_profile_load_failed")
         raise SourceError("无法读取本机 reader-profile.json") from None
+
+
+def history_source() -> SqlCipherReader:
+    profile = load_profile()
+    if profile is None:
+        raise SourceError("请先在微信初始化页验证并保存数据库配置")
+    return SqlCipherReader(Path(profile.database_path), profile.database_key.get_secret_value(), profile.account)
+
+
+@router.get("/history/conversations")
+def browse_conversations(
+    q: str = Query("", max_length=100), kind: Literal["all", "private", "group"] = "all",
+    offset: int = Query(0, ge=0, le=100000), limit: int = Query(50, ge=1, le=100),
+) -> dict:
+    try:
+        result = history_source().conversations(q=q, kind=kind, offset=offset, limit=limit)
+    except SourceError as exc:
+        log.warning("chat_history_read_failed", area="conversations", error=str(exc))
+        raise HTTPException(502, str(exc)) from None
+    log.info("chat_history_read", area="conversations", count=len(result["items"]))
+    return result
+
+
+@router.get("/history/messages")
+def browse_messages(
+    session_id: str = Query(min_length=1, max_length=256),
+    offset: int = Query(0, ge=0, le=100000), limit: int = Query(50, ge=1, le=100),
+) -> dict:
+    try:
+        result = history_source().history(session_id, offset=offset, limit=limit)
+    except SourceError as exc:
+        log.warning("chat_history_read_failed", area="messages", error=str(exc))
+        raise HTTPException(502, str(exc)) from None
+    log.info("chat_history_read", area="messages", count=len(result["items"]))
+    return result
 
 
 @router.get("/profile", response_model=ReaderProfile | None)

@@ -6,6 +6,7 @@ const router = useRouter()
 const tabs = [
   { path: '/', label: '发送控制台' },
   { path: '/setup', label: '微信初始化' },
+  { path: '/history', label: '聊天记录' },
   { path: '/rules', label: '规则与任务' },
 ]
 

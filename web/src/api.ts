@@ -11,6 +11,23 @@ import type {
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
+export interface Conversation {
+  id: string
+  name: string
+  kind: 'group' | 'private'
+  timestamp_ms: number
+}
+
+export interface HistoryMessage {
+  messageId: string
+  timestampMs: number
+  direction: 'in' | 'out'
+  kind: 'text' | 'other'
+  type_code: number
+  sender: { username: string | null; display_name: string | null }
+  text: string
+}
+
 export interface KeywordRule {
   group_id: string
   keyword: string
@@ -57,6 +74,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  conversations: (q: string, kind: string, offset: number) =>
+    request<{ items: Conversation[]; has_more: boolean }>(
+      `/reader/history/conversations?${new URLSearchParams({ q, kind, offset: String(offset) })}`,
+    ),
+  conversationMessages: (session_id: string, offset: number) =>
+    request<{ items: HistoryMessage[]; has_more: boolean }>(
+      `/reader/history/messages?${new URLSearchParams({ session_id, offset: String(offset) })}`,
+    ),
   readerKeyProgress: () => request<{ enabled: boolean; stage: string; message: string; steps: { stage: string; message: string }[] }>('/reader/key/progress'),
   readerProfile: () => request<{ database_path: string; account: string } | null>('/reader/profile'),
   readerAccountSelection: () => request<{ database_path: string; account: string } | null>('/reader/account-selection'),

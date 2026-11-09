@@ -34,6 +34,8 @@ MESSAGES = {
     "desktop_probe_failed": "微信数据库连接验证失败",
     "desktop_probe_invalid_response": "读取端返回了不兼容的数据",
     "desktop_probe_succeeded": "微信数据库连接验证通过",
+    "chat_history_read": "聊天记录读取完成",
+    "chat_history_read_failed": "读取聊天记录失败",
     "webhook_delivery_succeeded": "HTTP 回调成功",
     "webhook_delivery_failed": "HTTP 回调失败",
 }

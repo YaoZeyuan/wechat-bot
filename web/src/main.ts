@@ -7,12 +7,14 @@ import App from './App.vue'
 import ReaderSetup from './ReaderSetup.vue'
 import ReaderRules from './ReaderRules.vue'
 import AdminLayout from './AdminLayout.vue'
+import ChatHistory from './ChatHistory.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: App },
     { path: '/setup', component: ReaderSetup },
+    { path: '/history', component: ChatHistory },
     { path: '/rules', component: ReaderRules },
   ],
 })

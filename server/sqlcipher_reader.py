@@ -64,6 +64,52 @@ class SqlCipherReader:
             "hasMore": len(matches) > limit,
         }
 
+    def conversations(self, *, q: str, kind: str, offset: int, limit: int):
+        with self.open(self.root / "session" / "session.db") as db:
+            sessions = db.execute(
+                "SELECT username, last_timestamp FROM SessionTable ORDER BY sort_timestamp DESC, username"
+            ).fetchall()
+        with self.open(self.root / "contact" / "contact.db") as db:
+            names = dict(db.execute("""
+                SELECT username, COALESCE(NULLIF(remark,''), NULLIF(nick_name,''), username)
+                FROM contact
+            """).fetchall())
+        matches = []
+        search = q.casefold()
+        for row in sessions:
+            username = row["username"] or ""
+            group = username.endswith("@chatroom")
+            if not username or username.startswith("gh_") or username == "brandsessionholder":
+                continue
+            if kind != "all" and group != (kind == "group"):
+                continue
+            title = names.get(username) or username
+            if search not in title.casefold() and search not in username.casefold():
+                continue
+            matches.append({
+                "id": username, "name": title, "kind": "group" if group else "private",
+                "timestamp_ms": (row["last_timestamp"] or 0) * 1000,
+            })
+        return {"items": matches[offset:offset + limit], "has_more": len(matches) > offset + limit}
+
+    def history(self, session_id: str, *, offset: int, limit: int):
+        items = self.messages(session_id, offset=offset, limit=limit + 1)["items"]
+        has_more = len(items) > limit
+        items = items[:limit]
+        ids = sorted({item["sender"]["username"] for item in items if item["sender"]["username"]})
+        names = {}
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            with self.open(self.root / "contact" / "contact.db") as db:
+                names = dict(db.execute(f"""
+                    SELECT username, COALESCE(NULLIF(remark,''), NULLIF(nick_name,''), username)
+                    FROM contact WHERE username IN ({placeholders})
+                """, ids).fetchall())
+        for item in items:
+            sender = item["sender"]["username"]
+            item["sender"]["display_name"] = names.get(sender) or sender
+        return {"items": items, "has_more": has_more}
+
     def messages(self, session_id: str, *, offset=0, limit=1, **filters):
         table = "Msg_" + hashlib.md5(session_id.encode(), usedforsecurity=False).hexdigest()
         rows = []
@@ -105,6 +151,7 @@ class SqlCipherReader:
             "timestampMs": row["create_time"] * 1000,
             "direction": "out" if sender == self.account else "in",
             "kind": "text" if row["local_type"] == 1 else "other",
+            "type_code": row["local_type"],
             "sender": {"username": sender},
             "text": text,
         }
