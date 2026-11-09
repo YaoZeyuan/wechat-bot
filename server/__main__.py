@@ -7,12 +7,29 @@ import subprocess
 from pathlib import Path
 
 
+def create_app():
+    from .logging_setup import configure_logging
+    from .main import app
+
+    configure_logging()
+    return app
+
+
 def main():
     import uvicorn
     from .logging_setup import configure_logging
 
-    configure_logging()
-    uvicorn.run("server.main:app", host="127.0.0.1", port=8000, log_config=None, access_log=False)
+    parser = argparse.ArgumentParser(description="Start the FastAPI development server.")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--no-reload", action="store_true", help="Disable Python file watching")
+    args = parser.parse_args()
+    root = Path(__file__).resolve().parent.parent
+    configure_logging(write_file=False)
+    uvicorn.run(
+        "server.__main__:create_app", factory=True, host="127.0.0.1", port=args.port,
+        reload=not args.no_reload, reload_dirs=[] if args.no_reload else [root / "server", root / "sender"],
+        log_config=None, access_log=False,
+    )
 
 
 def web_main():

@@ -194,6 +194,8 @@ uv run dev-sender --help
 
 前两个命令分别启动 API（8000）和 Web（3000）。发送器是按次执行的 CLI，例如 `uv run dev-sender --devices`。读取本地数据库无需开启 Mock。
 
+`uv run dev-server` 默认监控 `server/` 和 `sender/` 中的 Python 文件并自动重启 API。需要关闭热重载时使用 `uv run dev-server --no-reload`。
+
 `dev-server` 在终端和 `local-data/logs/server.log` 同时输出 JSON 日志。常见日志的 `msg` 为中文，`event` 保留原始事件。日志单个文件约 5 MiB，最多保留 3 个历史文件。请求日志包含路由、状态码、耗时和请求 ID，可用响应头 `X-Request-ID` 定位对应请求。规则和手机任务按投递 ID 关联。
 
 在「规则与任务」设置全局轮询间隔（1–100 秒，默认 5 秒），按群名查找并启用监听群。群 ID 是监听和规则的唯一依据，群名用于显示。每个群的关键词规则可独立启停并选择动作，暂停监听会保留该群规则和读取游标。

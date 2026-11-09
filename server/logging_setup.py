@@ -51,6 +51,10 @@ UVICORN_MESSAGES = {
     "Waiting for application shutdown": "正在等待应用完成清理",
     "Application shutdown complete": "应用清理完成",
     "Finished server process": "后端进程已退出",
+    "Started reloader process": "Python 文件监控已启动",
+    "Stopping reloader process": "Python 文件监控已停止",
+    "WatchFiles detected changes": "检测到 Python 文件变动，正在重启后端",
+    "StatReload detected changes": "检测到 Python 文件变动，正在重启后端",
     "[Errno": "后端启动失败，请查看事件字段中的系统错误",
 }
 
@@ -70,10 +74,17 @@ def add_chinese_message(_, __, event):
     return event
 
 
-def configure_logging(log_dir: Path | None = None):
+def configure_logging(log_dir: Path | None = None, *, write_file: bool = True):
     if log_dir is None:
         log_dir = Path(__file__).resolve().parent.parent / "local-data" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    handlers = {"console": {"class": "logging.StreamHandler", "formatter": "json"}}
+    if write_file:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        handlers["file"] = {
+            "class": "logging.handlers.RotatingFileHandler", "formatter": "json",
+            "filename": str(log_dir / "server.log"), "encoding": "utf-8",
+            "maxBytes": 5 * 1024 * 1024, "backupCount": 3,
+        }
     common = [
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
@@ -101,15 +112,8 @@ def configure_logging(log_dir: Path | None = None):
                 structlog.processors.JSONRenderer(ensure_ascii=False),
             ],
         }},
-        "handlers": {
-            "console": {"class": "logging.StreamHandler", "formatter": "json"},
-            "file": {
-                "class": "logging.handlers.RotatingFileHandler", "formatter": "json",
-                "filename": str(log_dir / "server.log"), "encoding": "utf-8",
-                "maxBytes": 5 * 1024 * 1024, "backupCount": 3,
-            },
-        },
-        "root": {"handlers": ["console", "file"], "level": "INFO"},
+        "handlers": handlers,
+        "root": {"handlers": list(handlers), "level": "INFO"},
         "loggers": {
             "uvicorn": {"handlers": [], "propagate": True},
             "uvicorn.error": {"handlers": [], "propagate": True},
