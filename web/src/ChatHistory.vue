@@ -18,7 +18,6 @@ const messagesBusy = ref(false)
 const listError = ref('')
 const messageError = ref('')
 const ordered = computed(() => [...messages.value].reverse())
-const visibleCovers = ref(new Set<string>())
 let listVersion = 0
 let messageVersion = 0
 let messageOffset = 0
@@ -69,7 +68,6 @@ async function openConversation(conversation: Conversation, append = false) {
   const previousTop = timeline.value?.scrollTop ?? 0
   if (!append) {
     messages.value = []
-    visibleCovers.value.clear()
     messageOffset = 0
     moreMessages.value = false
   }
@@ -143,7 +141,7 @@ onMounted(() => loadConversations())
                 · {{ date(message.timestampMs) }}</small>
               <div class="bubble">
                 <a v-if="message.link" :href="message.link.url" target="_blank" rel="noopener noreferrer" class="shared-link">
-                  <img v-if="message.link.cover && visibleCovers.has(message.messageId)" :src="message.link.cover" alt="" loading="lazy" referrerpolicy="no-referrer" />
+                  <img v-if="message.link.cover" :src="message.link.cover" alt="" loading="lazy" referrerpolicy="no-referrer" />
                   <strong>{{ message.link.title || '网页链接' }}</strong>
                   <span v-if="message.link.description" class="link-description">{{ message.link.description }}</span>
                   <small v-if="message.link.source">{{ message.link.source }}</small>
@@ -151,8 +149,6 @@ onMounted(() => loadConversations())
                 </a>
                 <template v-else-if="message.file_name">[文件] {{ message.file_name }}</template>
                 <template v-else>{{ content(message) }}</template>
-                <a-button v-if="message.link?.cover && !visibleCovers.has(message.messageId)"
-                  type="text" size="mini" @click="visibleCovers.add(message.messageId)">加载网页封面</a-button>
               </div>
             </article>
           </div>
