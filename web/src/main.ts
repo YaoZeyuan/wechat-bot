@@ -8,6 +8,7 @@ import ReaderSetup from './ReaderSetup.vue'
 import ReaderRules from './ReaderRules.vue'
 import AdminLayout from './AdminLayout.vue'
 import ChatHistory from './ChatHistory.vue'
+import PluginCatalog from './PluginCatalog.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -15,7 +16,10 @@ const router = createRouter({
     { path: '/', component: App },
     { path: '/setup', component: ReaderSetup },
     { path: '/history', component: ChatHistory },
-    { path: '/rules', component: ReaderRules },
+    { path: '/rules', component: ReaderRules, beforeEnter: to =>
+      typeof to.query.group === 'string' ? { path: '/group', query: { group: to.query.group } } : true },
+    { path: '/group', component: ReaderRules },
+    { path: '/plugins', component: PluginCatalog },
   ],
 })
 

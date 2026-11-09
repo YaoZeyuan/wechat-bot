@@ -1,6 +1,7 @@
 """Local handlers and the HTTP callback transport for matching rules."""
 
 import structlog
+import webbrowser
 from collections.abc import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
@@ -18,18 +19,29 @@ class WebhookError(RuntimeError):
     """A diagnostic safe to show in the console."""
 
 
+class PluginActionError(RuntimeError):
+    pass
+
+
 def fixed_reply(event: MessageEvent) -> Reply:
     return Reply(content=Text(text="测试成功"))
 
 
+def open_baidu(event: MessageEvent) -> None:
+    if not webbrowser.open("https://www.baidu.com/", new=2):
+        raise PluginActionError("无法打开电脑默认浏览器")
+
+
 HANDLERS: dict[str, Callable[[MessageEvent], Reply | None]] = {
     "fixed_reply": fixed_reply,
+    "open_baidu": open_baidu,
 }
 
 # Stable plugin IDs are shared by rules, the catalog and group overrides.
 PLUGINS = {
-    "fixed_reply": {"name": "测试消息", "description": "回复预设测试文本", "default_enabled": True},
-    "webhook": {"name": "HTTP 回调", "description": "把命中的消息交给独立 HTTP 服务", "default_enabled": False},
+    "open_baidu": {"name": "打开百度", "description": "收到配置的关键词后，在电脑默认浏览器打开百度", "default_enabled": False, "version": "1.0.0", "capability": "浏览器"},
+    "fixed_reply": {"name": "测试消息", "description": "手动验证手机发送，或为关键词生成测试回复任务", "default_enabled": True, "version": "1.0.0", "capability": "手机发送"},
+    "webhook": {"name": "HTTP 回调", "description": "把命中的消息交给独立 HTTP 服务", "default_enabled": False, "version": "1.0.0", "capability": "HTTP"},
 }
 
 

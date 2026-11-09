@@ -17,6 +17,7 @@ from tempfile import NamedTemporaryFile
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, SecretStr
+from sender import SendError, create_sender
 
 from .ciphertalk import CipherTalk, SourceError
 from .sqlcipher_reader import SqlCipherReader
@@ -32,6 +33,7 @@ automation = Automation(Path(__file__).resolve().parent.parent / "automation.db"
 reader_status = {"enabled": False, "running": False, "error": None, "last_success_at": None, "interval_seconds": 5}
 monitoring_wake: asyncio.Event | None = None
 key_extraction_lock = Lock()
+test_send_lock = Lock()
 key_progress = {"stage": "idle", "message": "", "steps": []}
 profile_path = Path(__file__).resolve().parent.parent / "local-data" / "reader-profile.json"
 
@@ -163,13 +165,18 @@ def preview_rule(request: RulePreview) -> dict:
     rule = request.rule
     matched = rule.enabled and request.text.strip() == rule.keyword
     reply = None
-    if matched and rule.handler != "webhook":
+    if matched and rule.handler == "fixed_reply":
         event = MessageEvent(
             group_id=rule.group_id, message_id="preview", sender_id="preview",
             timestamp_ms=1, text=request.text,
         )
         reply = HANDLERS[rule.handler](event)
     return {"matched": matched, "handler": rule.handler, "reply": reply}
+
+
+@router.get("/plugins")
+def list_plugins() -> list[dict]:
+    return [{"id": plugin_id, **metadata} for plugin_id, metadata in PLUGINS.items()]
 
 
 class MockMessage(BaseModel):
@@ -364,6 +371,36 @@ def update_group_plugin(group_id: str, plugin_id: str, settings: GroupPluginSett
     automation.set_group_plugin(group_id, plugin_id, settings.enabled)
     log.info("desktop_group_plugin_changed", group_id=group_id, plugin_id=plugin_id, enabled=settings.enabled)
     return {"id": plugin_id, **PLUGINS[plugin_id], "enabled": settings.enabled}
+
+
+@router.post("/monitored-groups/{group_id}/test-send")
+def test_send_to_group(group_id: str) -> dict:
+    group = next((item for item in automation.monitored_groups() if item["group_id"] == group_id), None)
+    if not group or not group["enabled"]:
+        raise HTTPException(409, "请先启用该群机器人")
+    if not automation.group_plugins(group_id).get("fixed_reply", True):
+        raise HTTPException(409, "请先启用该群的「测试消息」插件")
+    if not test_send_lock.acquire(blocking=False):
+        raise HTTPException(409, "已有测试消息正在发送")
+    try:
+        details = history_source().conversation_details([group_id]).get(group_id, {})
+        target = details.get("original_name") or details.get("remark") or group["name"]
+        if target == group_id:
+            raise SourceError("未取得群名称，无法核对手机聊天标题")
+        event = MessageEvent(group_id=group_id, message_id="manual-test", sender_id="local",
+                             timestamp_ms=1, text="测试")
+        reply = HANDLERS["fixed_reply"](event)
+        sender = create_sender(dry_run=False)
+        sender.connect()
+        if not sender.send(target, reply.content.text, current_chat=True):
+            raise SendError("发送后未能确认结果，请先在手机查看，避免重复发送")
+    except (SourceError, SendError) as exc:
+        log.warning("group_test_send_failed", group_id=group_id, error=str(exc))
+        raise HTTPException(502, str(exc)) from None
+    finally:
+        test_send_lock.release()
+    log.info("group_test_send_succeeded", group_id=group_id)
+    return {"ok": True}
 
 
 @router.get("/history/details")

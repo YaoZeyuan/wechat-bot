@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import HttpUrl, model_validator
 
-from .plugins import HANDLERS, PLUGINS, WebhookError, call_webhook
+from .plugins import HANDLERS, PLUGINS, PluginActionError, WebhookError, call_webhook
 from .reply import ContractModel, MessageEvent, NonEmpty, SendTask
 
 log = structlog.get_logger("wechat_bot.automation")
@@ -145,6 +145,12 @@ class Automation:
                 "INSERT INTO group_plugins VALUES (?,?,?) ON CONFLICT(group_id, plugin_id) "
                 "DO UPDATE SET enabled=excluded.enabled", (group_id, plugin_id, enabled),
             )
+            if enabled and plugin_id == "open_baidu":
+                rule = Rule(group_id=group_id, keyword="测试", handler=plugin_id)
+                db.execute(
+                    "INSERT INTO rules VALUES (?,?,?) ON CONFLICT(group_id, keyword) DO NOTHING",
+                    (group_id, rule.keyword, rule.model_dump_json()),
+                )
 
     def set_monitoring(self, enabled: bool, interval_seconds: int | None = None):
         with self.database() as db:
@@ -257,7 +263,7 @@ class Automation:
                 task = SendTask.from_event(event, reply).model_dump_json()
         except Exception as exc:
             status = "failed"
-            error = str(exc) if isinstance(exc, WebhookError) else type(exc).__name__
+            error = str(exc) if isinstance(exc, (WebhookError, PluginActionError)) else type(exc).__name__
         with self.database() as db:
             db.execute(
                 "UPDATE deliveries SET status=?,task=?,error=? WHERE id=?",

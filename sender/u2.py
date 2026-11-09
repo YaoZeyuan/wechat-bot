@@ -284,7 +284,21 @@ class U2Sender:
             time.sleep(0.5)
         return self._input_cleared()
 
-    def send(self, target: str, text: str) -> bool:
+    def current_chat_input(self, target: str):
+        if self.d.app_current().get("package") != self.pkg:
+            raise SendError("请在手机微信中打开目标群聊")
+        title = self.d(text=target, packageName=self.pkg, className="android.widget.TextView")
+        height = self.d.window_size()[1]
+        if not any(item.info["bounds"]["top"] < height * 0.15 for item in title):
+            raise SendError(f"手机当前聊天页标题未匹配「{target}」，请打开对应群聊")
+        chat_input, _ = find(self.d, self.sel["chat_input"])
+        if chat_input is None:
+            raise SendError("当前页面没有聊天输入框")
+        if chat_input.get_text():
+            raise SendError("聊天输入框已有内容，请先处理草稿")
+        return chat_input
+
+    def send(self, target: str, text: str, *, current_chat: bool = False) -> bool:
         text = normalize_text(text)
         if not text or not text.strip():
             raise SendError("发送内容为空（或规范化后只剩空白）")
@@ -297,7 +311,7 @@ class U2Sender:
         probe = text_probe(text)
         print(f"[发送] 目标={target} 字数={len(text)} 演练={self.dry_run}")
         try:
-            chat_input = self._open_chat(target)
+            chat_input = self.current_chat_input(target) if current_chat else self._open_chat(target)
             try:
                 chat_input.clear_text()
             except Exception:
@@ -333,7 +347,8 @@ class U2Sender:
                 self._snapshot("verify_failed")
                 print("[警告] 点了发送但没校验到文本，请看 debug/ 里的截图确认。")
             try:
-                self.d.press("back")
+                if not current_chat:
+                    self.d.press("back")
             except Exception:
                 pass
             return ok

@@ -21,6 +21,40 @@ from server.wechat_scan_worker import image_template
 
 
 class DesktopPipelineTest(unittest.TestCase):
+    def test_baidu_plugin_opens_once_only_after_real_dispatch(self):
+        from server.reply import MessageEvent
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = Automation(Path(tmp) / "automation.db")
+            group = "fixture@chatroom"
+            bot.set_group_monitoring(group, "fixture", True)
+            bot.set_group_plugin(group, "open_baidu", True)
+            rule, = bot.rules()
+            event = MessageEvent(group_id=group, message_id="1", sender_id="member",
+                                 timestamp_ms=1, text="测试")
+            with patch("server.plugins.webbrowser.open", return_value=True) as open_page:
+                self.assertTrue(reader.preview_rule(reader.RulePreview(rule=rule, text="测试"))["matched"])
+                open_page.assert_not_called()
+                self.assertEqual(bot.dispatch(event), "acknowledged")
+                self.assertEqual(bot.dispatch(event), "duplicate")
+                open_page.assert_called_once_with("https://www.baidu.com/", new=2)
+
+    def test_manual_test_plugin_uses_current_phone_chat(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = Automation(Path(tmp) / "automation.db")
+            group = "fixture@chatroom"
+            bot.set_group_monitoring(group, "fixture", True)
+            with patch.object(reader, "automation", bot), patch.object(reader, "history_source") as source:
+                source.return_value.conversation_details.return_value = {
+                    group: {"original_name": "测试群", "remark": "备注"},
+                }
+                with patch.object(reader, "create_sender") as create:
+                    create.return_value.send.return_value = True
+                    self.assertEqual(reader.test_send_to_group(group), {"ok": True})
+                    create.assert_called_once_with(dry_run=False)
+                    create.return_value.connect.assert_called_once()
+                    create.return_value.send.assert_called_once_with("测试群", "测试成功", current_chat=True)
+
     def test_group_limit_and_plugin_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
             bot = Automation(Path(tmp) / "automation.db")

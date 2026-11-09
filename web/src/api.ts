@@ -59,6 +59,8 @@ export interface GroupPlugin {
   name: string
   description: string
   enabled: boolean
+  version: string
+  capability: string
 }
 
 interface Delivery {
@@ -100,6 +102,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  pluginCatalog: () => request<(Omit<GroupPlugin, 'enabled'> & { default_enabled: boolean })[]>('/reader/plugins'),
+  sendGroupTest: (groupId: string) =>
+    request<{ ok: boolean }>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/test-send`, { method: 'POST' }),
   conversationDetails: (session_id: string) =>
     request<ConversationDetails>(`/reader/history/details?${new URLSearchParams({ session_id })}`),
   groupPlugins: (groupId: string) =>

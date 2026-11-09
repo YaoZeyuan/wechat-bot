@@ -194,7 +194,7 @@ onMounted(async () => {
             <div><h2>{{ selected.name }}</h2><small>{{ selected.id }}</small></div>
             <div class="chat-actions">
               <template v-if="selected.kind === 'group'">
-                <RouterLink v-if="robotEnabled" :to="{ path: '/rules', query: { group: selected.id } }">配置机器人</RouterLink>
+                <RouterLink v-if="robotEnabled" :to="{ path: '/group', query: { group: selected.id } }">配置机器人</RouterLink>
                 <template v-else>
                   <a-button type="primary" :loading="robotBusy" :disabled="!robotGroups || robotLimitReached" @click="enableRobot">启用机器人</a-button>
                   <span v-if="robotLimitReached" class="limit-help" tabindex="0" :aria-label="robotLimitReason">

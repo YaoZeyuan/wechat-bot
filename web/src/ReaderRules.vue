@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { api, type GroupPlugin, type KeywordRule, type MonitoredGroup } from './api'
 
 const route = useRoute()
+const isGroupPage = computed(() => route.path === '/group')
 const groupId = computed(() => typeof route.query.group === 'string' ? route.query.group : '')
 const initialGroup = groupId.value
 const rule = ref<KeywordRule>({ group_id: initialGroup, keyword: '', handler: 'fixed_reply', url: null, enabled: true })
@@ -25,6 +26,8 @@ const currentDeliveries = computed(() => deliveries.value.filter(item => item.gr
 const enabledCount = computed(() => monitored.value.filter(group => group.enabled).length)
 const plugins = ref<GroupPlugin[]>([])
 const pluginError = ref('')
+const confirmTest = ref(false)
+const phoneGroupName = computed(() => currentGroup.value?.original_name || currentGroup.value?.remark || currentGroup.value?.name)
 const refreshError = ref('')
 let refreshTimer: number | undefined
 let refreshing = false
@@ -65,7 +68,26 @@ function togglePlugin(plugin: GroupPlugin) {
     const updated = await api.saveGroupPlugin(id, plugin.id, !plugin.enabled)
     if (currentGroup.value?.group_id === id) {
       plugins.value = plugins.value.map(item => item.id === updated.id ? updated : item)
+      if (updated.id === 'open_baidu' && updated.enabled) {
+        rules.value = (await api.readerRules()).items
+        const trigger = rules.value.find(rule => rule.group_id === id && rule.keyword === '测试')
+        if (trigger?.handler !== 'open_baidu') {
+          notice.value = '「测试」已被其他规则使用。可编辑该规则，把动作切换到「打开百度」。'
+        } else {
+          notice.value = '已启用「打开百度」。群收到「测试」时会在电脑打开网页。'
+        }
+      }
     }
+  })
+}
+
+function sendTest() {
+  confirmTest.value = false
+  const id = currentGroup.value?.group_id
+  if (!id) return
+  return run(async () => {
+    await api.sendGroupTest(id)
+    notice.value = '已确认发送「测试成功」。'
   })
 }
 
@@ -182,15 +204,15 @@ onUnmounted(() => window.clearInterval(refreshTimer))
 <template>
   <main class="page rules-page">
     <header class="page-heading">
-      <RouterLink v-if="groupId" to="/rules">返回规则与任务</RouterLink>
-      <h1>{{ groupId ? '群机器人配置' : '规则与任务' }}</h1>
-      <p v-if="!groupId">设置全局读取频率，或从监听群列表进入群机器人配置。</p>
+      <RouterLink v-if="isGroupPage" to="/rules">返回监听群列表</RouterLink>
+      <h1>{{ isGroupPage ? '群机器人配置' : '规则与任务' }}</h1>
+      <p v-if="!isGroupPage">设置全局读取频率，或从监听群列表进入群机器人配置。</p>
     </header>
 
     <a-alert v-if="error" type="error">{{ error }}</a-alert>
     <a-alert v-if="notice" type="success">{{ notice }}</a-alert>
 
-    <section v-if="!groupId" class="card" aria-labelledby="global-heading">
+    <section v-if="!isGroupPage" class="card" aria-labelledby="global-heading">
       <div class="card-head">
         <h2 id="global-heading">全局监听</h2>
         <a-tag v-if="monitoring" :color="monitoring.enabled ? 'green' : 'gray'">
@@ -213,20 +235,20 @@ onUnmounted(() => window.clearInterval(refreshTimer))
       <p v-else class="muted">正在读取监听设置…</p>
     </section>
 
-      <section v-if="!groupId" class="card" aria-labelledby="groups-heading">
+      <section v-if="!isGroupPage" class="card" aria-labelledby="groups-heading">
         <h2 id="groups-heading">监听群</h2>
         <p v-if="!monitored.length" class="muted">还没有监听群。请在聊天记录中打开一个群，点击「启用机器人」。</p>
         <RouterLink to="/history">前往聊天记录</RouterLink>
         <template v-if="monitored.length">
         <ul class="compact-list">
           <li v-for="group in monitored" :key="group.group_id">
-            <RouterLink class="identity" :to="{ path: '/rules', query: { group: group.group_id } }">
+            <RouterLink class="identity" :to="{ path: '/group', query: { group: group.group_id } }">
               <strong>{{ group.remark || group.original_name || group.name }}</strong>
               <small v-if="group.remark && group.original_name && group.original_name !== group.remark">{{ group.original_name }}</small>
               <small>{{ group.group_id }}</small>
             </RouterLink>
             <a-tag :color="group.enabled ? 'green' : 'gray'">{{ group.enabled ? '启用' : '暂停' }}</a-tag>
-            <RouterLink :to="{ path: '/rules', query: { group: group.group_id } }">配置</RouterLink>
+            <RouterLink :to="{ path: '/group', query: { group: group.group_id } }">配置</RouterLink>
           </li>
         </ul>
         </template>
@@ -254,6 +276,8 @@ onUnmounted(() => window.clearInterval(refreshTimer))
               <div class="identity"><strong>{{ plugin.name }}</strong><small>{{ plugin.description }}</small></div>
               <a-tag :color="plugin.enabled ? 'green' : 'gray'">{{ plugin.enabled ? '启用' : '停用' }}</a-tag>
               <a-button size="small" :disabled="busy" @click="togglePlugin(plugin)">{{ plugin.enabled ? '停用' : '启用' }}</a-button>
+              <a-button v-if="plugin.id === 'fixed_reply'" size="small" type="primary"
+                :disabled="busy || !plugin.enabled || !currentGroup.enabled" @click="confirmTest = true">发送测试消息</a-button>
             </li>
           </ul>
           <h3>触发规则</h3>
@@ -302,10 +326,10 @@ onUnmounted(() => window.clearInterval(refreshTimer))
             </div>
           </details>
         </template>
-        <p v-else class="muted">{{ busy ? '正在加载群配置…' : '没有找到该群配置。请先在聊天记录中为该群启用机器人。' }}</p>
+        <p v-else class="muted">{{ busy ? '正在加载群配置…' : groupId ? '没有找到该群配置。请先在聊天记录中为该群启用机器人。' : '请从监听群列表选择一个群。' }}</p>
       </section>
 
-    <section v-if="groupId && currentGroup" class="card" aria-labelledby="records-heading">
+    <section v-if="isGroupPage && currentGroup" class="card" aria-labelledby="records-heading">
       <div class="card-head">
         <h2 id="records-heading">执行记录与待发送任务</h2>
         <a-button :disabled="busy" @click="run(load)">刷新</a-button>
@@ -328,6 +352,9 @@ onUnmounted(() => window.clearInterval(refreshTimer))
         </li>
       </ul>
     </section>
+    <a-modal v-model:visible="confirmTest" title="发送测试消息" ok-text="确认发送" @ok="sendTest">
+      请先用手机打开「{{ phoneGroupName }}」聊天页并保持输入框为空。确认后会实际发送「测试成功」。
+    </a-modal>
   </main>
 </template>
 

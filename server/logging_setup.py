@@ -18,6 +18,8 @@ MESSAGES = {
     "desktop_group_monitoring_changed": "群监听状态已更新",
     "desktop_group_limit_reached": "已达到监听群数量上限",
     "desktop_group_plugin_changed": "群插件开关已更新",
+    "group_test_send_failed": "群测试消息发送未完成",
+    "group_test_send_succeeded": "群测试消息已确认发送",
     "desktop_group_rule_saved": "群内关键词规则已保存",
     "phone_task_claimed": "待发送任务已领取",
     "phone_task_result": "待发送任务结果已回写",

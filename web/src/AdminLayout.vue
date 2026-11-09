@@ -8,6 +8,8 @@ const tabs = [
   { path: '/setup', label: '微信初始化' },
   { path: '/history', label: '聊天记录' },
   { path: '/rules', label: '规则与任务' },
+  { path: '/group', label: '群配置' },
+  { path: '/plugins', label: '插件管理' },
 ]
 
 function navigate(path: string | number) {
