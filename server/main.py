@@ -14,6 +14,7 @@ import subprocess
 import sys
 from time import perf_counter
 from uuid import uuid4
+from threading import Lock
 import structlog
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
@@ -50,6 +51,8 @@ app = FastAPI(title="wechat-bot", version="0.1.0", lifespan=reader_lifespan)
 app.include_router(reader_router)
 request_log = structlog.get_logger("wechat_bot.http")
 sender_log = structlog.get_logger("wechat_bot.sender")
+sender_console_lock = Lock()
+sender_steps: list[str] = []
 
 
 @app.middleware("http")
@@ -221,6 +224,25 @@ def sender_status() -> dict[str, bool]:
 
 @app.post("/api/sender/send")
 def send_from_console(req: SendRequest) -> dict[str, Any]:
+    if not sender_console_lock.acquire(blocking=False):
+        raise HTTPException(409, "已有发送操作正在执行")
+    sender_steps.clear()
+    try:
+        sender_steps.append("检查手机连接")
+        return run_console_send(req)
+    except HTTPException as exc:
+        sender_steps.append(str(exc.detail))
+        raise
+    finally:
+        sender_console_lock.release()
+
+
+@app.get("/api/sender/progress")
+def sender_progress() -> dict:
+    return {"running": sender_console_lock.locked(), "steps": list(sender_steps)}
+
+
+def run_console_send(req: SendRequest) -> dict[str, Any]:
     ready = [item for item in _devices() if item["state"] == "device"]
     if len(ready) != 1:
         raise HTTPException(409, "请连接并授权一台手机")
@@ -235,7 +257,11 @@ def execute_send(req: SendRequest, *, explicit_mode: bool = False) -> dict[str, 
     if not req.text or not req.text.strip():
         raise HTTPException(status_code=400, detail="发送内容为空")
     sender = create_sender(cfg=cfg, serial=req.serial, dry_run=req.dry_run if explicit_mode or req.dry_run else None)
+    if explicit_mode:
+        sender.on_progress = sender_steps.append
     try:
+        if explicit_mode:
+            sender_steps.append("正在连接手机")
         sender.connect()
         ok = sender.send(target, req.text, strict_target=True) if explicit_mode else sender.send(target, req.text)
     except SendError as exc:
@@ -245,6 +271,8 @@ def execute_send(req: SendRequest, *, explicit_mode: bool = False) -> dict[str, 
         sender_log.error("sender_send_failed", error_type=type(exc).__name__)
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
     sender_log.info("sender_send_finished", ok=ok, dry_run=bool(sender.dry_run), chars=len(req.text))
+    if explicit_mode:
+        sender_steps.append("操作完成" if ok else "未能确认发送结果，请先在手机核对")
     return {
         "ok": ok,
         "target": target,

@@ -13,6 +13,7 @@ const logs = ref<LogItem[]>([])
 const error = ref('')
 const notice = ref('')
 const busy = ref(false)
+const steps = ref<string[]>([])
 const saving = ref(false)
 
 const target = ref('')
@@ -83,6 +84,8 @@ async function doSend(): Promise<void> {
   error.value = ''
   notice.value = ''
   busy.value = true
+  steps.value = []
+  const timer = window.setInterval(() => { void refreshProgress() }, 500)
   try {
     const result = await api.sendFromConsole({
       text: text.value,
@@ -100,7 +103,17 @@ async function doSend(): Promise<void> {
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
+    window.clearInterval(timer)
+    await refreshProgress()
     busy.value = false
+  }
+}
+
+async function refreshProgress() {
+  try {
+    steps.value = (await api.senderProgress()).steps
+  } catch {
+    // The send request itself reports a connection failure.
   }
 }
 
@@ -125,7 +138,7 @@ async function saveConfig(): Promise<void> {
 
 onMounted(async () => {
   statusTimer = window.setInterval(() => { if (!document.hidden && !busy.value) void refreshDevice() }, 5000)
-  await Promise.all([refresh(), loadConfig()])
+  await Promise.all([refresh(), loadConfig(), refreshProgress()])
 })
 onUnmounted(() => window.clearInterval(statusTimer))
 </script>
@@ -166,6 +179,10 @@ onUnmounted(() => window.clearInterval(statusTimer))
           <button class="ghost" :disabled="busy" @click="refresh">刷新状态</button>
         </div>
         <p v-if="deviceReady === false" class="hint">请连接并授权一台手机，再刷新状态。</p>
+        <h3 v-if="steps.length">发送过程</h3>
+        <ol v-if="steps.length" aria-live="polite">
+          <li v-for="(step, index) in steps" :key="index">{{ step }}</li>
+        </ol>
       </section>
 
       <section class="card">

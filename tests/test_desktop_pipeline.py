@@ -21,6 +21,25 @@ from server.wechat_scan_worker import image_template
 
 
 class DesktopPipelineTest(unittest.TestCase):
+    def test_strict_search_skips_query_and_rejects_ambiguous_results(self):
+        from unittest.mock import Mock
+        from sender.u2 import U2Sender
+
+        sender = U2Sender.__new__(U2Sender)
+        sender.pkg = "com.tencent.mm"
+        sender.on_progress = None
+        query = Mock(info={"className": "android.widget.EditText", "bounds": {"top": 10}})
+        heading = Mock(info={"className": "android.widget.TextView", "bounds": {"top": 20}})
+        match = Mock(info={"className": "android.widget.TextView", "bounds": {"top": 120}})
+        sender.d = Mock(return_value=[query, heading, match])
+        self.assertTrue(sender._click_result("群", strict_target=True, search_bottom=100))
+        match.click.assert_called_once()
+        query.click.assert_not_called()
+        heading.click.assert_not_called()
+        sender.d.return_value.append(Mock(info=match.info))
+        self.assertFalse(sender._click_result("群", strict_target=True, search_bottom=100))
+        match.click.assert_called_once()
+
     def test_sender_console_requires_one_phone_and_can_send_live(self):
         from server import main
 

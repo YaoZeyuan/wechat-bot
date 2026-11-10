@@ -7,6 +7,7 @@ uiautomator2 3.x 移除了 atx-agent / init / connect_wifi / set_fastinput_ime�
 from __future__ import annotations
 
 import time
+import structlog
 from datetime import datetime
 from pathlib import Path
 
@@ -59,6 +60,12 @@ class U2Sender:
         self.debug_dir = ROOT / self.cfg.get("debug_dir", "debug")
         self.conn = init_db(ROOT / self.cfg.get("database", "bot.db"))
         self.d = None
+        self.on_progress = None
+
+    def progress(self, message):
+        structlog.get_logger("wechat_bot.sender").info("sender_step", msg=message)
+        if self.on_progress:
+            self.on_progress(message)
 
     def connect(self):
         try:
@@ -170,24 +177,32 @@ class U2Sender:
             "看 debug/ 截图与界面层级调整 selectors。"
         )
 
-    def _click_result(self, target, *, strict_target=False) -> bool:
+    def _click_result(self, target, *, strict_target=False, search_bottom=0) -> bool:
         """在搜索结果里点击目标会话，跳过输入框节点。"""
+        if strict_target:
+            matches = []
+            for obj in self.d(text=target, packageName=self.pkg):
+                info = obj.info
+                bounds = info.get("visibleBounds") or info.get("bounds") or {}
+                if info.get("className") != "android.widget.EditText" and bounds.get("top", -1) >= search_bottom:
+                    matches.append(obj)
+            if len(matches) != 1:
+                self.progress(f"搜索区找到 {len(matches)} 个同名结果，无法唯一定位")
+                return False
+            matches[0].click()
+            return True
         selectors = (
             {"text": target, "className": self.result_class},
             {"textContains": target, "className": self.result_class},
         )
-        for sel in selectors[:1] if strict_target else selectors:
+        for sel in selectors:
             try:
                 obj = self.d(**sel)
                 if bool(obj.exists):
-                    if strict_target and obj.count != 1:
-                        return False
                     obj.click()
                     return True
             except Exception:
                 continue
-        if strict_target:
-            return False
         for index in range(4):
             try:
                 obj = self.d(textContains=target, instance=index)
@@ -202,9 +217,17 @@ class U2Sender:
         return False
 
     def _open_chat(self, target, *, strict_target=False):
-        self.d.app_start(self.pkg)
-        time.sleep(self.page_delay)
-        self._goto_home()
+        self.progress("检查手机微信首页")
+        if strict_target:
+            if self.d.app_current().get("package") != self.pkg:
+                raise SendError("请先在手机前台打开微信并停在聊天首页")
+            mark, _ = find_waiting(self.d, self.sel["home_mark"], 2.0)
+            if mark is None:
+                raise SendError("未识别到微信聊天首页，请手动切到聊天列表后重试")
+        else:
+            self.d.app_start(self.pkg)
+            time.sleep(self.page_delay)
+            self._goto_home()
 
         # 路径 A：目标已在主界面会话列表里，直接点，绕开搜索页输入
         direct = self.d(text=target, className=self.result_class)
@@ -215,12 +238,19 @@ class U2Sender:
             found, _ = find_waiting(self.d, self.sel["chat_input"], 3.0)
             if found is not None:
                 return found
+            if strict_target:
+                raise SendError("点开目标后未找到聊天输入框")
             self.d.press("back")
             time.sleep(self.delay)
             self._goto_home()
 
         # 路径 B：搜索
-        entry, used = find_waiting(self.d, self.sel["search_entry"], self.wait_timeout)
+        search_entries = [
+            *self.sel["search_entry"],
+            {"resourceId": f"{self.pkg}:id/meb"},
+            {"resourceId": f"{self.pkg}:id/icon_search"},
+        ]
+        entry, used = find_waiting(self.d, search_entries, self.wait_timeout)
         if entry is None:
             raise SendError(
                 "找不到微信首页的搜索入口。运行 .venv/Scripts/python.exe send.py --dump 看界面，"
@@ -228,20 +258,22 @@ class U2Sender:
             )
         print(f"[搜索] 入口命中 {used}")
         entry.click()
+        self.progress("已打开搜索，正在查找目标会话")
         time.sleep(self.page_delay)
 
         box, _ = find_waiting(self.d, self.sel["search_input"], self.wait_timeout)
         if box is None:
             raise SendError("搜索页找不到输入框，改 selectors.search_input。")
         box.click()
+        search_bottom = (box.info.get("bounds") or {}).get("bottom", 0) if strict_target else 0
         time.sleep(self.delay)
         self._set_text_checked(box, target, "搜索框")
         time.sleep(self.page_delay)
 
-        if not self._click_result(target, strict_target=strict_target):
+        if not self._click_result(target, strict_target=strict_target, search_bottom=search_bottom):
             self._snapshot("search_failed")
             raise SendError(
-                f"搜索「{target}」没有可点的结果。确认名字与微信里显示一致，或看 debug/ 截图。"
+                f"搜索「{target}」未能唯一定位会话。确认名称与微信显示一致，或查看 debug/ 截图。"
             )
         time.sleep(self.page_delay)
 
@@ -319,6 +351,7 @@ class U2Sender:
             chat_input = self.current_chat_input(target) if current_chat else self._open_chat(target, strict_target=strict_target)
             if strict_target and not current_chat:
                 chat_input = self.current_chat_input(target)
+            self.progress("已进入聊天页，正在填入文本")
             try:
                 chat_input.clear_text()
             except Exception:
@@ -327,6 +360,7 @@ class U2Sender:
             self._type_text(chat_input, text)
 
             if self.dry_run:
+                self.progress("演练完成，未点击发送")
                 self._snapshot("dry_run")
                 print("[演练] 文本已填入输入框，未点击发送。内容：\n" + text)
                 try:
@@ -344,6 +378,7 @@ class U2Sender:
                 )
             print(f"[发送] 按钮命中 {used}")
             button.click()
+            self.progress("已点击发送，正在核对结果")
             time.sleep(self.delay)
 
             ok = self._verify_sent(probe, before)
@@ -354,7 +389,7 @@ class U2Sender:
                 self._snapshot("verify_failed")
                 print("[警告] 点了发送但没校验到文本，请看 debug/ 里的截图确认。")
             try:
-                if not current_chat:
+                if not current_chat and not strict_target:
                     self.d.press("back")
             except Exception:
                 pass

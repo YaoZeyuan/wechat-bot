@@ -227,3 +227,4 @@ uv run python -m server.export_history --snapshot local-data/snapshot --account 
 - [AstrBot](https://github.com/AstrBotDevs/AstrBot)。参考了消息事件、关键词指令和插件处理函数的分层。
 - [MaiBot（麦麦）](https://github.com/Mai-with-u/MaiBot)。参考了 WebUI 将运行状态、配置和执行记录分区的方式。
 - [Arco Design Vue](https://github.com/arco-design/arco-design-vue)。用于后台导航及界面组件。
+- [android-rpa](https://github.com/1parado/android-rpa)。参考了手机微信搜索控件候选和过滤搜索框、定位会话结果的方式。

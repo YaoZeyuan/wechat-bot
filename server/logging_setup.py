@@ -76,7 +76,7 @@ def add_chinese_message(_, __, event):
         )
     else:
         message = MESSAGES.get(name, name)
-    event["msg"] = message
+    event.setdefault("msg", message)
     return event
 
 

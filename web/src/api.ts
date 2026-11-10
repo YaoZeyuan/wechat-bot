@@ -102,6 +102,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  senderProgress: () => request<{ running: boolean; steps: string[] }>('/sender/progress'),
   senderStatus: () => request<{ connected: boolean }>('/sender/status'),
   sendFromConsole: (payload: SendPayload) =>
     request<SendResult>('/sender/send', { method: 'POST', body: JSON.stringify(payload) }),
