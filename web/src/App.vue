@@ -19,6 +19,13 @@ const saving = ref(false)
 const target = ref('')
 const text = ref('')
 const dryRun = ref(true)
+const kind = ref<'contact' | 'group' | 'file_helper'>('file_helper')
+const targetId = ref('')
+const attachments = ref<File[]>([])
+
+function pickFiles(event: Event) {
+  attachments.value = Array.from((event.target as HTMLInputElement).files ?? [])
+}
 
 const form = ref({
   default_target: '',
@@ -85,30 +92,40 @@ async function doSend(): Promise<void> {
   notice.value = ''
   busy.value = true
   steps.value = []
-  const timer = window.setInterval(() => { void refreshProgress() }, 500)
   try {
-    const result = await api.sendFromConsole({
-      text: text.value,
-      target: target.value.trim(),
-      dry_run: dryRun.value,
-    })
-    if (result.dry_run) {
-      notice.value = '演练完成：文本已填入输入框，未点击发送。'
-    } else if (result.ok) {
-      notice.value = '发送完成，文本已在会话中校验到。'
-    } else {
-      notice.value = '已点击发送，但没校验到文本，请看 debug/ 里的截图。'
+    const messages: ({ type: 'text'; text: string } | { type: 'image' | 'file'; asset_id: string })[] = []
+    if (text.value.trim()) messages.push({ type: 'text', text: text.value })
+    for (const file of attachments.value) {
+      steps.value.push('正在上传附件 ' + file.name)
+      const assetId = crypto.randomUUID()
+      await api.uploadSenderAsset(assetId, file)
+      messages.push({ type: /\.(png|jpe?g)$/i.test(file.name) ? 'image' : 'file', asset_id: assetId })
     }
+    const requestId = crypto.randomUUID()
+    const helper = kind.value === 'file_helper'
+    let result = await api.submitSenderJob({
+      version: 1,
+      request_id: requestId,
+      mode: dryRun.value ? 'dry_run' : 'send',
+      target: { kind: kind.value, id: helper ? 'filehelper' : targetId.value.trim(), name: helper ? '文件传输助手' : target.value.trim() },
+      messages,
+    })
+    while (result.status === 'queued' || result.status === 'running') {
+      steps.value = result.steps
+      await new Promise(resolve => window.setTimeout(resolve, 500))
+      result = await api.senderJob(requestId)
+    }
+    const labels: Record<string, string> = { pending: '未执行', checked: '演练通过', sent: '已发送', uncertain: '待核对', failed: '失败' }
+    steps.value = [...result.steps, ...result.items.map((item, index) => `第 ${index + 1} 条消息 · ${labels[item] ?? item}`)]
+    if (result.status === 'completed') notice.value = dryRun.value ? '演练完成' : '发送完成'
+    else error.value = result.status === 'uncertain' ? '结果待核对，请先查看手机会话' : '任务失败，请查看发送过程'
     await refresh()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
-    window.clearInterval(timer)
-    await refreshProgress()
     busy.value = false
   }
 }
-
 async function refreshProgress() {
   try {
     steps.value = (await api.senderProgress()).steps
@@ -148,7 +165,7 @@ onUnmounted(() => window.clearInterval(statusTimer))
     <header class="topbar">
       <div>
         <h1>Sender 发送调试</h1>
-        <p class="sub">在手机微信停留于首页，填写联系人或群聊名称和要发送的文本。</p>
+        <p class="sub">在手机前台打开微信，然后选择会话并填写文字或上传附件。</p>
       </div>
       <div class="badges">
         <span class="badge" :class="apiOnline ? 'ok' : 'warn'">API {{ apiOnline ? '在线' : '离线' }}</span>
@@ -162,18 +179,31 @@ onUnmounted(() => window.clearInterval(statusTimer))
     <div class="grid">
       <section class="card">
         <h2>发送消息</h2>
-        <label>目标会话
+        <label>会话类型
+          <select v-model="kind">
+            <option value="file_helper">文件传输助手</option>
+            <option value="contact">联系人</option>
+            <option value="group">群聊</option>
+          </select>
+        </label>
+        <label v-if="kind !== 'file_helper'">会话 ID
+          <input v-model="targetId" />
+        </label>
+        <label v-if="kind !== 'file_helper'">目标会话
           <input v-model="target" placeholder="群名或文件传输助手" />
         </label>
         <label>文本
           <textarea v-model="text" rows="8" placeholder="输入要发送的内容，支持中文与多行"></textarea>
+        </label>
+        <label>附件（PNG、JPEG、TXT、PDF）
+          <input type="file" multiple accept=".png,.jpg,.jpeg,.txt,.pdf" @change="pickFiles" />
         </label>
         <label class="check">
           <input type="checkbox" v-model="dryRun" />
           仅演练（填入输入框但不点击发送）
         </label>
         <div class="row">
-          <button class="primary" :disabled="busy || deviceReady !== true || !target.trim() || !text.trim()" @click="doSend">
+          <button class="primary" :disabled="busy || deviceReady !== true || (kind !== 'file_helper' && (!target.trim() || !targetId.trim())) || (!text.trim() && !attachments.length)" @click="doSend">
             {{ busy ? '处理中…' : dryRun ? '演练发送' : '实际发送' }}
           </button>
           <button class="ghost" :disabled="busy" @click="refresh">刷新状态</button>

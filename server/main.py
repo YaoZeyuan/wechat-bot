@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import json
 import shutil
 import sqlite3
@@ -47,7 +48,18 @@ EDITABLE_KEYS = (
 
 from server.reader import reader_lifespan, router as reader_router
 
-app = FastAPI(title="wechat-bot", version="0.1.0", lifespan=reader_lifespan)
+from server.sender_jobs import recover_jobs, router as sender_jobs_router
+
+
+@asynccontextmanager
+async def lifespan(app):
+    recover_jobs()
+    async with reader_lifespan(app):
+        yield
+
+
+app = FastAPI(title="wechat-bot", version="0.1.0", lifespan=lifespan)
+app.include_router(sender_jobs_router)
 app.include_router(reader_router)
 request_log = structlog.get_logger("wechat_bot.http")
 sender_log = structlog.get_logger("wechat_bot.sender")

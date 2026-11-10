@@ -7,6 +7,8 @@ uiautomator2 3.x 移除了 atx-agent / init / connect_wifi / set_fastinput_ime�
 from __future__ import annotations
 
 import time
+import re
+import xml.etree.ElementTree as ET
 import structlog
 from datetime import datetime
 from pathlib import Path
@@ -186,7 +188,9 @@ class U2Sender:
                 bounds = info.get("visibleBounds") or info.get("bounds") or {}
                 if info.get("className") != "android.widget.EditText" and bounds.get("top", -1) >= search_bottom:
                     matches.append(obj)
-            if len(matches) != 1:
+            if len(matches) > 1:
+                raise SendError("搜索区存在多个同名结果，无法唯一定位")
+            if not matches:
                 self.progress(f"搜索区找到 {len(matches)} 个同名结果，无法唯一定位")
                 return False
             matches[0].click()
@@ -218,12 +222,13 @@ class U2Sender:
 
     def _open_chat(self, target, *, strict_target=False):
         self.progress("检查手机微信首页")
+        search_entries = [
+            *self.sel["search_entry"],
+            {"resourceId": f"{self.pkg}:id/meb"},
+            {"resourceId": f"{self.pkg}:id/icon_search"},
+        ]
         if strict_target:
-            if self.d.app_current().get("package") != self.pkg:
-                raise SendError("请先在手机前台打开微信并停在聊天首页")
-            mark, _ = find_waiting(self.d, self.sel["home_mark"], 2.0)
-            if mark is None:
-                raise SendError("未识别到微信聊天首页，请手动切到聊天列表后重试")
+            self._restore_foreground_home(search_entries)
         else:
             self.d.app_start(self.pkg)
             time.sleep(self.page_delay)
@@ -245,11 +250,6 @@ class U2Sender:
             self._goto_home()
 
         # 路径 B：搜索
-        search_entries = [
-            *self.sel["search_entry"],
-            {"resourceId": f"{self.pkg}:id/meb"},
-            {"resourceId": f"{self.pkg}:id/icon_search"},
-        ]
         entry, used = find_waiting(self.d, search_entries, self.wait_timeout)
         if entry is None:
             raise SendError(
@@ -270,7 +270,16 @@ class U2Sender:
         self._set_text_checked(box, target, "搜索框")
         time.sleep(self.page_delay)
 
-        if not self._click_result(target, strict_target=strict_target, search_bottom=search_bottom):
+        matched = self._click_result(target, strict_target=strict_target, search_bottom=search_bottom)
+        if not matched and strict_target:
+            self._restore_foreground_home(search_entries)
+            folded = self.d(text="折叠的聊天", packageName=self.pkg)
+            if folded.count == 1:
+                self.progress("全局搜索未命中，正在查看折叠的聊天")
+                folded.click()
+                time.sleep(self.page_delay)
+                matched = self._click_result(target, strict_target=True)
+        if not matched:
             self._snapshot("search_failed")
             raise SendError(
                 f"搜索「{target}」未能唯一定位会话。确认名称与微信显示一致，或查看 debug/ 截图。"
@@ -281,6 +290,50 @@ class U2Sender:
         if chat_input is None:
             raise SendError("点进会话后找不到输入框，改 selectors.chat_input。")
         return chat_input
+
+    def _restore_foreground_home(self, search_entries):
+        for attempt in range(6):
+            current = self.focused_app()
+            if current.get("package") != self.pkg:
+                raise SendError("请先将要操作的微信打开到前台")
+            mark, _ = find(self.d, self.sel["home_mark"])
+            search, _ = find(self.d, search_entries)
+            if current.get("activity", "").endswith(".LauncherUI"):
+                if mark is not None or search is not None:
+                    self.progress("已确认微信聊天首页")
+                    return
+                search_box, _ = find(self.d, self.sel["search_input"])
+                if search_box is None:
+                    raise SendError(self.home_detection_error())
+            if attempt < 5:
+                self.progress("当前在微信子页面，返回上一级")
+                self.d.press("back")
+                time.sleep(self.page_delay)
+        raise SendError("未能返回微信聊天首页，请检查手机当前页面")
+
+    def home_detection_error(self):
+        try:
+            roots = ET.fromstring(self.d.dump_hierarchy()).findall("node")
+        except (ET.ParseError, OSError, RuntimeError):
+            roots = []
+        windows = [node for node in roots if node.get("package") == self.pkg]
+        if windows and all(node.get("bounds") == "[0,0][0,0]" for node in windows):
+            if any(node.get("package") == "com.tencent.wetype" for node in roots):
+                return "手机前台是微信，但系统只返回了键盘和空的微信窗口。请手动收起键盘，再点底部「微信」后重试。"
+            return "已确认前台是微信，但 Android 返回了空的微信控件树，暂时无法定位目标会话。"
+        return "未识别到微信聊天首页，请点底部「微信」回到聊天列表后重试"
+
+    def focused_app(self):
+        """Use Android's focused window, including work profiles and app clones."""
+        try:
+            output = self.d.shell(["dumpsys", "window"], timeout=5).output
+            match = re.search(r"mCurrentFocus=Window\{[^\r\n]*?\bu(\d+)\s+([\w.]+)/([\w.$]+)", output)
+            if match:
+                user, package, activity = match.groups()
+                return {"package": package, "activity": activity, "user": user}
+        except (OSError, RuntimeError):
+            pass
+        return self.d.app_current()
 
     def _type_text(self, chat_input, text):
         chat_input.click()
@@ -321,8 +374,12 @@ class U2Sender:
             time.sleep(0.5)
         return self._input_cleared()
 
+    def prepare_chat(self, target: str):
+        self._open_chat(target, strict_target=True)
+        self.current_chat_input(target)
+
     def current_chat_input(self, target: str):
-        if self.d.app_current().get("package") != self.pkg:
+        if self.focused_app().get("package") != self.pkg:
             raise SendError("请在手机微信中打开目标群聊")
         title = self.d(text=target, packageName=self.pkg, className="android.widget.TextView")
         height = self.d.window_size()[1]

@@ -101,7 +101,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
+interface SenderJobResult {
+  status: string
+  steps: string[]
+  items: string[]
+}
+
 export const api = {
+  uploadSenderAsset: (id: string, file: File) =>
+    request(`/sender/assets/${id}?filename=${encodeURIComponent(file.name)}`, { method: 'PUT', body: file }),
+  submitSenderJob: (payload: unknown) =>
+    request<SenderJobResult>('/sender/jobs', { method: 'POST', body: JSON.stringify(payload) }),
+  senderJob: (id: string) => request<SenderJobResult>(`/sender/jobs/${id}`),
   senderProgress: () => request<{ running: boolean; steps: string[] }>('/sender/progress'),
   senderStatus: () => request<{ connected: boolean }>('/sender/status'),
   sendFromConsole: (payload: SendPayload) =>
