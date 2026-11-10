@@ -98,7 +98,11 @@ public final class Bridge extends AccessibilityService {
         require(!matching(named("最近聊天")).isEmpty(), "未确认微信分享会话选择页");
         String kind = request.getString("kind");
         boolean image = kind.equals("image");
+        boolean file = kind.equals("file");
         String content = kind.equals("text") ? request.getString("text") : request.optString("filename");
+        Predicate<AccessibilityNodeInfo> contentMatch = file
+            ? n -> named(content).test(n) || truncatedFilename(value(n.getText()).toString(), content)
+            : named(content);
         Rect recent = new Rect();
         unique(named("最近聊天"), "最近聊天分区").getBoundsInScreen(recent);
         List<AccessibilityNodeInfo> rows = shareRows(target, recent.bottom);
@@ -142,8 +146,8 @@ public final class Bridge extends AccessibilityService {
                     || groupLabel.matcher(value(n.getContentDescription())).matches())))).size() == 1,
                 "分享确认页未核对到唯一收件人");
             if (!image) {
-                require(!matching(n -> !n.isEditable() && named(content).test(n) && lowerSheet(n, button)).isEmpty(),
-                    "分享确认页内容未匹配");
+                require(!matching(n -> !n.isEditable() && contentMatch.test(n) && lowerSheet(n, button)).isEmpty(),
+                    "分享确认页内容未匹配" + (kind.equals("file") ? filePreview(button) : ""));
             }
             if (request.getBoolean("dry_run")) {
                 click(unique(named("取消"), "取消分享按钮"));
@@ -162,13 +166,27 @@ public final class Bridge extends AccessibilityService {
             pause();
             if (matching(named("最近聊天")).isEmpty()
                 && !matching(AccessibilityNodeInfo::isEditable).isEmpty()
-                && !matching(image ? named("图片") : named(content)).isEmpty()) {
+                && !matching(image ? named("图片") : contentMatch).isEmpty()) {
                 return new JSONObject();
             }
         }
         throw new IOException("已点击分享发送，但未核对到消息，请在会话中确认");
     }
 
+    private static boolean truncatedFilename(String shown, String filename) {
+        String[] parts = shown.split("\\.\\.\\.|…", -1);
+        return parts.length == 2 && parts[0].length() >= 4 && parts[1].length() >= 4
+            && filename.length() > parts[0].length() + parts[1].length()
+            && filename.startsWith(parts[0]) && filename.endsWith(parts[1]);
+    }
+    private String filePreview(Rect button) {
+        List<String> labels = new ArrayList<>();
+        for (AccessibilityNodeInfo node : matching(n -> lowerSheet(n, button) && !n.isEditable())) {
+            String label = value(node.getText()).toString();
+            if (label.endsWith(".pdf") || label.contains("…") || label.contains("...")) labels.add(label);
+        }
+        return labels.isEmpty() ? "" : "，微信显示 " + String.join(" / ", labels);
+    }
     private List<AccessibilityNodeInfo> shareRows(String target, int minTop) {
         List<AccessibilityNodeInfo> rows = new ArrayList<>();
         for (AccessibilityNodeInfo node : matching(n -> !n.isEditable() && target.contentEquals(value(n.getText())))) {
