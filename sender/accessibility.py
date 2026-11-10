@@ -179,12 +179,17 @@ class AccessibilitySender:
     def leave_share(self, user):
         import time
 
-        for _ in range(4):
+        share_pages = {"MvvmContactListUI", "SelectConversationUI", "SendAppMessageWrapperUI",
+                       "ShareImgUI", "ConvBoxTransmitUI"}
+        for attempt in range(5):
             active = self.foreground()
             if not active or active.group(1) != user or active.group(2) != "com.tencent.mm":
                 return
-            activity = active.group(3).rsplit(".", 1)[-1]
-            if activity not in {"MvvmContactListUI", "SelectConversationUI", "SendAppMessageWrapperUI", "ShareImgUI", "ConvBoxTransmitUI"}:
+            if active.group(3).rsplit(".", 1)[-1] not in share_pages:
+                return
+            if attempt == 4:
+                self.device.shell(["am", "start", "-W", "--user", user,
+                                   "-n", "com.tencent.mm/.ui.LauncherUI"], timeout=10)
                 return
             self.device.shell(["input", "keyevent", "KEYCODE_BACK"], timeout=5)
             time.sleep(0.4)
