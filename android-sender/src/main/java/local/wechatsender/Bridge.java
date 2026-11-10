@@ -129,23 +129,32 @@ public final class Bridge extends AccessibilityService {
         require(rows.size() == 1, "分享会话匹配数为 " + rows.size() + "，请确认手机备注唯一且可搜索");
         click(rows.get(0));
         pause();
-        AccessibilityNodeInfo send = unique(named("发送"), "分享确认发送按钮");
-        Rect button = new Rect();
-        send.getBoundsInScreen(button);
-        java.util.regex.Pattern groupLabel = java.util.regex.Pattern.compile(
-            java.util.regex.Pattern.quote(target) + "\\s*[（(]\\d+人[）)]");
-        boolean group = request.optBoolean("group");
-        require(matching(n -> lowerSheet(n, button) && (named(target).test(n)
-            || (group && (groupLabel.matcher(value(n.getText())).matches()
-                || groupLabel.matcher(value(n.getContentDescription())).matches())))).size() == 1,
-            "分享确认页未核对到唯一收件人");
-        if (!image) {
-            require(matching(n -> named(content).test(n) && lowerSheet(n, button)).size() == 1,
-                "分享确认页内容未匹配");
-        }
-        if (request.getBoolean("dry_run")) {
-            click(unique(named("取消"), "取消分享按钮"));
-            return new JSONObject();
+        AccessibilityNodeInfo send;
+        try {
+            send = unique(named("发送"), "分享确认发送按钮");
+            Rect button = new Rect();
+            send.getBoundsInScreen(button);
+            java.util.regex.Pattern groupLabel = java.util.regex.Pattern.compile(
+                java.util.regex.Pattern.quote(target) + "\\s*[（(]\\d+人[）)]");
+            boolean group = request.optBoolean("group");
+            require(matching(n -> lowerSheet(n, button) && (named(target).test(n)
+                || (group && (groupLabel.matcher(value(n.getText())).matches()
+                    || groupLabel.matcher(value(n.getContentDescription())).matches())))).size() == 1,
+                "分享确认页未核对到唯一收件人");
+            if (!image) {
+                require(!matching(n -> !n.isEditable() && named(content).test(n) && lowerSheet(n, button)).isEmpty(),
+                    "分享确认页内容未匹配");
+            }
+            if (request.getBoolean("dry_run")) {
+                click(unique(named("取消"), "取消分享按钮"));
+                return new JSONObject();
+            }
+        } catch (Exception error) {
+            List<AccessibilityNodeInfo> cancel = matching(named("取消"));
+            if (cancel.size() == 1) {
+                try { click(cancel.get(0)); } catch (IOException ignored) {}
+            }
+            throw error;
         }
         clicked[0] = true;
         click(send);

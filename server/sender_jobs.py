@@ -150,6 +150,7 @@ def resolve_target(target: Target) -> str:
     return name
 
 def run(job, result):
+    from sender.accessibility import ShareRejected
     from server.main import _devices, create_sender, sender_console_lock, sender_log
 
     key = str(job.request_id)
@@ -210,7 +211,7 @@ def run(job, result):
             result["status"] = "completed"
             progress("任务完成")
         except Exception as exc:
-            result["status"] = "uncertain" if sending else "failed"
+            result["status"] = "uncertain" if sending and not isinstance(exc, ShareRejected) else "failed"
             if index is not None:
                 result["items"][index] = result["status"]
             progress(str(exc) or type(exc).__name__)

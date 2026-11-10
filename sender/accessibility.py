@@ -10,6 +10,10 @@ from .store import init_db, log_send
 from .text import normalize_text
 
 
+class ShareRejected(SendError):
+    """The phone confirmed that the share was rejected before clicking Send."""
+
+
 class AccessibilitySender:
     def __init__(self, cfg, serial=None, dry_run=None):
         setup_adb(cfg)
@@ -43,7 +47,8 @@ class AccessibilitySender:
         except (OSError, ValueError) as exc:
             raise SendError("手机无障碍通道未响应，请检查手机端服务是否已启用") from exc
         if not result["ok"] and not result.get("uncertain"):
-            raise SendError(result["error"])
+            error_type = ShareRejected if action == "share" else SendError
+            raise error_type(result["error"])
         return result
 
     def prepare_chat(self, target):
@@ -180,7 +185,7 @@ class AccessibilitySender:
         import time
 
         share_pages = {"MvvmContactListUI", "SelectConversationUI", "SendAppMessageWrapperUI",
-                       "ShareImgUI", "ConvBoxTransmitUI"}
+                       "ShareImgUI", "ConvBoxTransmitUI", "HalfScreenTransparentActivity"}
         for attempt in range(5):
             active = self.foreground()
             if not active or active.group(1) != user or active.group(2) != "com.tencent.mm":
