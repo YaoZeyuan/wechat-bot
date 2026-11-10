@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 const route = useRoute()
 const router = useRouter()
 const tabs = [
-  { path: '/', label: '发送控制台' },
+  { path: '/sender', label: 'Sender' },
   { path: '/setup', label: '微信初始化' },
   { path: '/history', label: '聊天记录' },
   { path: '/rules', label: '规则与任务' },

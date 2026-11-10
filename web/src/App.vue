@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from './api'
-import type { Device, HealthResponse, LogItem, Stats } from './types'
+import type { HealthResponse, LogItem, Stats } from './types'
 
 const health = ref<HealthResponse | null>(null)
-const devices = ref<Device[]>([])
-const deviceReady = ref(false)
-const deviceHint = ref('')
+const deviceReady = ref<boolean | null>(null)
+let statusTimer: number | undefined
+let checkingDevice = false
 const stats = ref<Stats | null>(null)
 const logs = ref<LogItem[]>([])
 
@@ -21,20 +21,24 @@ const dryRun = ref(true)
 
 const form = ref({
   default_target: '',
-  serial: '',
   step_delay: 0.6,
   dry_run: false,
 })
 
 const apiOnline = computed(() => health.value?.ok === true)
-const deviceText = computed(() => {
-  if (deviceReady.value) {
-    return devices.value.filter((item) => item.state === 'device').map((item) => item.serial).join(', ')
+const deviceText = computed(() => deviceReady.value === null ? '待确认' : deviceReady.value ? '已连接' : '不可用')
+
+async function refreshDevice() {
+  if (checkingDevice) return
+  checkingDevice = true
+  try {
+    deviceReady.value = (await api.senderStatus()).connected
+  } catch {
+    deviceReady.value = null
+  } finally {
+    checkingDevice = false
   }
-  const first = devices.value[0]
-  if (first && first.state !== 'device') return `${first.serial} 状态 ${first.state}`
-  return '未连接'
-})
+}
 
 function formatTime(value: string): string {
   return value.slice(0, 19).replace('T', ' ')
@@ -47,16 +51,13 @@ function resultText(item: LogItem): string {
 
 async function refresh(): Promise<void> {
   try {
-    const [h, d, l, s] = await Promise.all([
+    const [h, l, s] = await Promise.all([
       api.health(),
-      api.devices(),
       api.logs(),
       api.stats(),
+      refreshDevice(),
     ])
     health.value = h
-    devices.value = d.devices
-    deviceReady.value = d.ready
-    deviceHint.value = d.hint
     logs.value = l.items
     stats.value = s
   } catch (cause) {
@@ -69,7 +70,6 @@ async function loadConfig(): Promise<void> {
     const cfg = await api.getConfig()
     form.value = {
       default_target: String(cfg.default_target ?? ''),
-      serial: String(cfg.serial ?? ''),
       step_delay: Number(cfg.step_delay ?? 0.6),
       dry_run: Boolean(cfg.dry_run),
     }
@@ -84,9 +84,9 @@ async function doSend(): Promise<void> {
   notice.value = ''
   busy.value = true
   try {
-    const result = await api.send({
+    const result = await api.sendFromConsole({
       text: text.value,
-      target: target.value || undefined,
+      target: target.value.trim(),
       dry_run: dryRun.value,
     })
     if (result.dry_run) {
@@ -111,7 +111,6 @@ async function saveConfig(): Promise<void> {
   try {
     await api.patchConfig({
       default_target: form.value.default_target,
-      serial: form.value.serial,
       step_delay: Number(form.value.step_delay),
       dry_run: form.value.dry_run,
     })
@@ -125,20 +124,22 @@ async function saveConfig(): Promise<void> {
 }
 
 onMounted(async () => {
+  statusTimer = window.setInterval(() => { if (!document.hidden && !busy.value) void refreshDevice() }, 5000)
   await Promise.all([refresh(), loadConfig()])
 })
+onUnmounted(() => window.clearInterval(statusTimer))
 </script>
 
 <template>
   <div class="page">
     <header class="topbar">
       <div>
-        <h1>wechat-bot 控制台</h1>
-        <p class="sub">电脑端消息读取与手机发送</p>
+        <h1>Sender 发送调试</h1>
+        <p class="sub">在手机微信停留于首页，填写联系人或群聊名称和要发送的文本。</p>
       </div>
       <div class="badges">
         <span class="badge" :class="apiOnline ? 'ok' : 'warn'">API {{ apiOnline ? '在线' : '离线' }}</span>
-        <span class="badge" :class="deviceReady ? 'ok' : 'warn'">设备 {{ deviceText }}</span>
+        <span class="badge" :class="deviceReady ? 'ok' : 'warn'">手机{{ deviceText }}</span>
       </div>
     </header>
 
@@ -159,21 +160,18 @@ onMounted(async () => {
           仅演练（填入输入框但不点击发送）
         </label>
         <div class="row">
-          <button class="primary" :disabled="busy || !text.trim()" @click="doSend">
+          <button class="primary" :disabled="busy || deviceReady !== true || !target.trim() || !text.trim()" @click="doSend">
             {{ busy ? '处理中…' : dryRun ? '演练发送' : '实际发送' }}
           </button>
           <button class="ghost" :disabled="busy" @click="refresh">刷新状态</button>
         </div>
-        <p class="hint">没插手机时服务端会返回明确错误，不会静默失败。</p>
+        <p v-if="deviceReady === false" class="hint">请连接并授权一台手机，再刷新状态。</p>
       </section>
 
       <section class="card">
         <h2>配置</h2>
         <label>默认目标
           <input v-model="form.default_target" />
-        </label>
-        <label>设备序列号（留空自动选择）
-          <input v-model="form.serial" placeholder="USB 序列号或 IP:端口" />
         </label>
         <label>每步延时（秒）
           <input v-model.number="form.step_delay" type="number" step="0.1" min="0" />
@@ -188,7 +186,6 @@ onMounted(async () => {
           </button>
         </div>
         <p class="hint">保存后写入项目根目录的 config.json；UI 选择器候选也在这个文件里。</p>
-        <p v-if="deviceHint" class="hint warn-text">{{ deviceHint }}</p>
       </section>
     </div>
 

@@ -49,6 +49,7 @@ from server.reader import reader_lifespan, router as reader_router
 app = FastAPI(title="wechat-bot", version="0.1.0", lifespan=reader_lifespan)
 app.include_router(reader_router)
 request_log = structlog.get_logger("wechat_bot.http")
+sender_log = structlog.get_logger("wechat_bot.sender")
 
 
 @app.middleware("http")
@@ -111,10 +112,15 @@ def _devices() -> list[dict[str, str]]:
     adb = shutil.which("adb")
     if not adb:
         return []
-    proc = subprocess.run(
-        [adb, "devices", "-l"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
+    try:
+        proc = subprocess.run(
+            [adb, "devices", "-l"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if proc.returncode:
+        return []
     items = []
     for line in proc.stdout.splitlines()[1:]:
         parts = line.split()
@@ -205,18 +211,40 @@ def preview(req: SendRequest) -> dict[str, Any]:
 
 @app.post("/api/send")
 def send(req: SendRequest) -> dict[str, Any]:
+    return execute_send(req)
+
+
+@app.get("/api/sender/status")
+def sender_status() -> dict[str, bool]:
+    return {"connected": sum(item["state"] == "device" for item in _devices()) == 1}
+
+
+@app.post("/api/sender/send")
+def send_from_console(req: SendRequest) -> dict[str, Any]:
+    ready = [item for item in _devices() if item["state"] == "device"]
+    if len(ready) != 1:
+        raise HTTPException(409, "请连接并授权一台手机")
+    if not req.target or not req.target.strip():
+        raise HTTPException(422, "请填写联系人或群聊名称")
+    return execute_send(req.model_copy(update={"serial": ready[0]["serial"], "target": req.target.strip()}), explicit_mode=True)
+
+
+def execute_send(req: SendRequest, *, explicit_mode: bool = False) -> dict[str, Any]:
     cfg = load_config()
     target = req.target or cfg.get("default_target", "文件传输助手")
     if not req.text or not req.text.strip():
         raise HTTPException(status_code=400, detail="发送内容为空")
-    sender = create_sender(cfg=cfg, serial=req.serial, dry_run=True if req.dry_run else None)
+    sender = create_sender(cfg=cfg, serial=req.serial, dry_run=req.dry_run if explicit_mode or req.dry_run else None)
     try:
         sender.connect()
-        ok = sender.send(target, req.text)
+        ok = sender.send(target, req.text, strict_target=True) if explicit_mode else sender.send(target, req.text)
     except SendError as exc:
+        sender_log.warning("sender_send_failed", error_type=type(exc).__name__)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
+        sender_log.error("sender_send_failed", error_type=type(exc).__name__)
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
+    sender_log.info("sender_send_finished", ok=ok, dry_run=bool(sender.dry_run), chars=len(req.text))
     return {
         "ok": ok,
         "target": target,

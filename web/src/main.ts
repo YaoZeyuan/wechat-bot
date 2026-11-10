@@ -13,7 +13,8 @@ import PluginCatalog from './PluginCatalog.vue'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', component: App },
+    { path: '/', redirect: '/sender' },
+    { path: '/sender', component: App },
     { path: '/setup', component: ReaderSetup },
     { path: '/history', component: ChatHistory },
     { path: '/rules', component: ReaderRules, beforeEnter: to =>

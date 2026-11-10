@@ -102,6 +102,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  senderStatus: () => request<{ connected: boolean }>('/sender/status'),
+  sendFromConsole: (payload: SendPayload) =>
+    request<SendResult>('/sender/send', { method: 'POST', body: JSON.stringify(payload) }),
   pluginCatalog: () => request<(Omit<GroupPlugin, 'enabled'> & { default_enabled: boolean })[]>('/reader/plugins'),
   sendGroupTest: (groupId: string) =>
     request<{ ok: boolean }>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/test-send`, { method: 'POST' }),

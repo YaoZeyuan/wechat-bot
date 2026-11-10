@@ -170,19 +170,24 @@ class U2Sender:
             "看 debug/ 截图与界面层级调整 selectors。"
         )
 
-    def _click_result(self, target) -> bool:
+    def _click_result(self, target, *, strict_target=False) -> bool:
         """在搜索结果里点击目标会话，跳过输入框节点。"""
-        for sel in (
+        selectors = (
             {"text": target, "className": self.result_class},
             {"textContains": target, "className": self.result_class},
-        ):
+        )
+        for sel in selectors[:1] if strict_target else selectors:
             try:
                 obj = self.d(**sel)
                 if bool(obj.exists):
+                    if strict_target and obj.count != 1:
+                        return False
                     obj.click()
                     return True
             except Exception:
                 continue
+        if strict_target:
+            return False
         for index in range(4):
             try:
                 obj = self.d(textContains=target, instance=index)
@@ -196,14 +201,14 @@ class U2Sender:
                 continue
         return False
 
-    def _open_chat(self, target):
+    def _open_chat(self, target, *, strict_target=False):
         self.d.app_start(self.pkg)
         time.sleep(self.page_delay)
         self._goto_home()
 
         # 路径 A：目标已在主界面会话列表里，直接点，绕开搜索页输入
         direct = self.d(text=target, className=self.result_class)
-        if bool(direct.exists):
+        if bool(direct.exists) and (not strict_target or direct.count == 1):
             print(f"[会话] 主界面直点：{target}")
             direct.click()
             time.sleep(self.page_delay)
@@ -233,7 +238,7 @@ class U2Sender:
         self._set_text_checked(box, target, "搜索框")
         time.sleep(self.page_delay)
 
-        if not self._click_result(target):
+        if not self._click_result(target, strict_target=strict_target):
             self._snapshot("search_failed")
             raise SendError(
                 f"搜索「{target}」没有可点的结果。确认名字与微信里显示一致，或看 debug/ 截图。"
@@ -298,7 +303,7 @@ class U2Sender:
             raise SendError("聊天输入框已有内容，请先处理草稿")
         return chat_input
 
-    def send(self, target: str, text: str, *, current_chat: bool = False) -> bool:
+    def send(self, target: str, text: str, *, current_chat: bool = False, strict_target: bool = False) -> bool:
         text = normalize_text(text)
         if not text or not text.strip():
             raise SendError("发送内容为空（或规范化后只剩空白）")
@@ -311,7 +316,9 @@ class U2Sender:
         probe = text_probe(text)
         print(f"[发送] 目标={target} 字数={len(text)} 演练={self.dry_run}")
         try:
-            chat_input = self.current_chat_input(target) if current_chat else self._open_chat(target)
+            chat_input = self.current_chat_input(target) if current_chat else self._open_chat(target, strict_target=strict_target)
+            if strict_target and not current_chat:
+                chat_input = self.current_chat_input(target)
             try:
                 chat_input.clear_text()
             except Exception:

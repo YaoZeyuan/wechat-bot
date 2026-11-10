@@ -21,6 +21,24 @@ from server.wechat_scan_worker import image_template
 
 
 class DesktopPipelineTest(unittest.TestCase):
+    def test_sender_console_requires_one_phone_and_can_send_live(self):
+        from server import main
+
+        phone = {"serial": "fixture", "state": "device"}
+        request = main.SendRequest(target="测试群", text="测试成功", dry_run=False)
+        with patch.object(main, "_devices", return_value=[phone, phone]):
+            self.assertEqual(main.sender_status(), {"connected": False})
+            with self.assertRaises(HTTPException) as failure:
+                main.send_from_console(request)
+            self.assertEqual(failure.exception.status_code, 409)
+        with patch.object(main, "_devices", return_value=[phone]), patch.object(main, "create_sender") as create:
+            create.return_value.dry_run = False
+            create.return_value.send.return_value = True
+            self.assertEqual(main.sender_status(), {"connected": True})
+            self.assertTrue(main.send_from_console(request)["ok"])
+            self.assertFalse(create.call_args.kwargs["dry_run"])
+            create.return_value.send.assert_called_once_with("测试群", "测试成功", strict_target=True)
+
     def test_baidu_plugin_opens_once_only_after_real_dispatch(self):
         from server.reply import MessageEvent
 

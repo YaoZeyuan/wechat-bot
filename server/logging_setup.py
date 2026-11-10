@@ -9,6 +9,8 @@ import structlog
 
 MESSAGES = {
     "http_request": "HTTP 请求处理完成",
+    "sender_send_failed": "手机发送失败",
+    "sender_send_finished": "手机发送处理结束",
     "keyword_delivery": "关键词规则投递处理完成",
     "delivery_recovery": "中断的投递已标为失败，可手动重试",
     "desktop_messages_processed": "已处理新收到的桌面消息",
