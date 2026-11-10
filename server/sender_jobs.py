@@ -3,6 +3,7 @@ import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from time import time
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -104,6 +105,13 @@ async def upload(asset_id: UUID, filename: str, request: Request):
 
 @router.post("/jobs", status_code=202)
 def submit(job: Job, tasks: BackgroundTasks):
+    result, inserted = queue_job(job)
+    if inserted:
+        tasks.add_task(run, job, result)
+    return result
+
+
+def queue_job(job: Job, *, strict=True):
     key = str(job.request_id)
     payload = job.model_dump_json()
     result = {"request_id": key, "status": "queued", "steps": [], "items": ["pending"] * len(job.messages)}
@@ -111,11 +119,10 @@ def submit(job: Job, tasks: BackgroundTasks):
         inserted = conn.execute("INSERT OR IGNORE INTO jobs VALUES (?, ?, ?)", (key, payload, json.dumps(result)))
         if not inserted.rowcount:
             stored, previous = conn.execute("SELECT payload, result FROM jobs WHERE id = ?", (key,)).fetchone()
-            if Job.model_validate_json(stored) != job:
+            if strict and Job.model_validate_json(stored) != job:
                 raise HTTPException(409, "任务 ID 已用于另一份请求")
-            return json.loads(previous)
-    tasks.add_task(run, job, result)
-    return result
+            return json.loads(previous), False
+    return result, True
 
 
 @router.get("/jobs/{request_id}")
@@ -193,11 +200,14 @@ def run(job, result):
                 progress(f"处理第 {index + 1} 条消息")
                 sending = job.mode == "send"
                 if isinstance(item, TextMessage):
+                    started_ms = int(time() * 1000)
                     if hasattr(phone, "share_text"):
                         ok = phone.share_text(target, item.text, group=job.target.kind == "group")
                     else:
                         phone.prepare_chat(target)
                         ok = phone.send(target, item.text, current_chat=True)
+                    if sending:
+                        result.setdefault("text_sends", []).append([index, started_ms, int(time() * 1000)])
                 else:
                     path, filename = assets[item.asset_id]
                     ok = phone.send_asset(target, item.type, path, filename, group=job.target.kind == "group")

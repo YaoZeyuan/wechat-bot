@@ -61,11 +61,11 @@ watch(() => currentGroup.value?.group_id, async (id, _, onCleanup) => {
   }
 }, { immediate: true })
 
-function togglePlugin(plugin: GroupPlugin) {
+function savePlugin(plugin: GroupPlugin, enabled: boolean) {
   const id = currentGroup.value?.group_id
   if (!id) return
   return run(async () => {
-    const updated = await api.saveGroupPlugin(id, plugin.id, !plugin.enabled)
+    const updated = await api.saveGroupPlugin(id, plugin.id, enabled, plugin.keyword, plugin.reply)
     if (currentGroup.value?.group_id === id) {
       plugins.value = plugins.value.map(item => item.id === updated.id ? updated : item)
       if (updated.id === 'open_baidu' && updated.enabled) {
@@ -87,7 +87,7 @@ function sendTest() {
   if (!id) return
   return run(async () => {
     await api.sendGroupTest(id)
-    notice.value = '已确认发送「测试成功」。'
+    notice.value = '已确认发送测试回复。'
   })
 }
 
@@ -274,8 +274,14 @@ onUnmounted(() => window.clearInterval(refreshTimer))
           <ul v-if="plugins.length" class="compact-list">
             <li v-for="plugin in plugins" :key="plugin.id">
               <div class="identity"><strong>{{ plugin.name }}</strong><small>{{ plugin.description }}</small></div>
+              <div v-if="plugin.id === 'fixed_reply'" class="identity">
+                <label>触发关键词 <a-input v-model="plugin.keyword" :max-length="200" :disabled="busy" /></label>
+                <label>回复内容 <a-textarea v-model="plugin.reply" :max-length="1800" :disabled="busy" /></label>
+                <a-button size="small" :disabled="busy || !plugin.keyword || !plugin.reply?.trim()"
+                  @click="savePlugin(plugin, plugin.enabled)">保存参数</a-button>
+              </div>
               <a-tag :color="plugin.enabled ? 'green' : 'gray'">{{ plugin.enabled ? '启用' : '停用' }}</a-tag>
-              <a-button size="small" :disabled="busy" @click="togglePlugin(plugin)">{{ plugin.enabled ? '停用' : '启用' }}</a-button>
+              <a-button size="small" :disabled="busy" @click="savePlugin(plugin, !plugin.enabled)">{{ plugin.enabled ? '停用' : '启用' }}</a-button>
               <a-button v-if="plugin.id === 'fixed_reply'" size="small" type="primary"
                 :disabled="busy || !plugin.enabled || !currentGroup.enabled" @click="confirmTest = true">发送测试消息</a-button>
             </li>
@@ -353,7 +359,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
       </ul>
     </section>
     <a-modal v-model:visible="confirmTest" title="发送测试消息" ok-text="确认发送" @ok="sendTest">
-      请先用手机打开「{{ phoneGroupName }}」聊天页并保持输入框为空。确认后会实际发送「测试成功」。
+      请先用手机打开「{{ phoneGroupName }}」聊天页并保持输入框为空。确认后会实际发送该群配置的测试回复。
     </a-modal>
   </main>
 </template>

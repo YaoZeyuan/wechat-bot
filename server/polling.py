@@ -5,6 +5,7 @@ import structlog
 from .automation import Automation
 from .ciphertalk import SourceError
 from .reply import MessageEvent
+from .group_plugins import dispatch as dispatch_builtin
 
 log = structlog.get_logger("wechat_bot.polling")
 PAGE_SIZE = 50
@@ -74,7 +75,8 @@ def poll_group(source, automation: Automation, group_id: str, source_id: str = "
     for identity, row in reversed(newer.items()):
         event = incoming_text(group_id, row, f"{source_id}:{identity}" if source_id else identity)
         if event is not None:
-            automation.dispatch(event)
+            handled_test = dispatch_builtin(source, automation, event)
+            automation.dispatch(event, skip_fixed=handled_test)
     automation.save_cursor(cursor_key, next(iter(newer)))
     log.info("desktop_messages_processed", count=len(newer))
     return len(newer)

@@ -14,6 +14,42 @@ from .ciphertalk import SourceError
 from .ciphertalk_cli import CipherTalkCLI
 
 
+def protobuf_strings(data: bytes):
+    """Read length-delimited fields from WeChat's group member records."""
+    index = 0
+
+    def varint():
+        nonlocal index
+        result = 0
+        for shift in range(0, 70, 7):
+            if index == len(data):
+                break
+            byte = data[index]
+            index += 1
+            result |= (byte & 127) << shift
+            if byte < 128:
+                return result
+        raise ValueError("invalid varint")
+
+    while index < len(data):
+        tag = varint()
+        wire = tag & 7
+        if wire == 0:
+            varint()
+            continue
+        if wire == 2:
+            size = varint()
+        elif wire in (1, 5):
+            size = 8 if wire == 1 else 4
+        else:
+            raise ValueError("unsupported protobuf wire type")
+        end = index + size
+        if end > len(data):
+            raise ValueError("truncated protobuf field")
+        if wire == 2:
+            yield tag >> 3, data[index:end]
+        index = end
+
 class SqlCipherReader:
     @classmethod
     def discover(cls):
@@ -83,6 +119,31 @@ class SqlCipherReader:
         return {row["username"]: {
             "original_name": row["nick_name"] or "", "remark": row["remark"] or "",
         } for row in rows}
+
+    def group_nicknames(self, group_id: str) -> dict[str, str]:
+        with self.open(self.root / "contact" / "contact.db") as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='chat_room'").fetchone():
+                return {}
+            columns = {row[1] for row in db.execute("PRAGMA table_info(chat_room)")}
+            if not {"username", "ext_buffer"} <= columns:
+                return {}
+            row = db.execute("SELECT ext_buffer FROM chat_room WHERE username=?", (group_id,)).fetchone()
+        if not row or not isinstance(row[0], bytes):
+            return {}
+
+        names = {}
+        try:
+            for field, member in protobuf_strings(row[0]):
+                if field != 1:
+                    continue
+                values = dict(protobuf_strings(member))
+                username = values.get(1, b"").decode("utf-8")
+                nickname = values.get(2, b"").decode("utf-8")
+                if username and nickname:
+                    names[username] = nickname
+        except (ValueError, UnicodeError):
+            return {}
+        return names
 
     def conversations(self, *, q: str, kind: str, offset: int, limit: int):
         matches = []

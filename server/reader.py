@@ -24,6 +24,7 @@ from .sqlcipher_reader import SqlCipherReader
 from .ciphertalk_cli import CipherTalkCLI
 from .automation import Automation, GroupLimitError, MAX_MONITORED_GROUPS, Rule
 from .plugins import HANDLERS, PLUGINS
+from . import group_plugins as builtin_plugins
 from .polling import incoming_text, message_id, poll_group
 from .reply import MessageEvent, SendTask
 
@@ -353,24 +354,36 @@ def update_monitored_group(group: GroupMonitoring) -> GroupMonitoring:
     return group
 
 
-class GroupPluginSettings(BaseModel):
-    enabled: bool
+class GroupPluginSettings(builtin_plugins.Settings):
+    pass
 
 
 @router.get("/monitored-groups/{group_id}/plugins")
 def list_group_plugins(group_id: str) -> list[dict]:
     settings = automation.group_plugins(group_id)
-    return [{"id": plugin_id, **meta, "enabled": settings.get(plugin_id, meta["default_enabled"])}
-            for plugin_id, meta in PLUGINS.items()]
+    return [
+        {"id": plugin_id, **meta, **(
+            builtin_plugins.config(group_id, plugin_id, settings).model_dump(
+                include=None if plugin_id == "fixed_reply" else {"enabled"}
+            ) if plugin_id in builtin_plugins.BUILTINS else
+            {"enabled": settings.get(plugin_id, meta["default_enabled"])}
+        )}
+        for plugin_id, meta in PLUGINS.items()
+    ]
 
 
 @router.put("/monitored-groups/{group_id}/plugins/{plugin_id}")
 def update_group_plugin(group_id: str, plugin_id: str, settings: GroupPluginSettings) -> dict:
     if plugin_id not in PLUGINS or not any(item["group_id"] == group_id for item in automation.monitored_groups()):
         raise HTTPException(404, "未找到所选群或插件")
-    automation.set_group_plugin(group_id, plugin_id, settings.enabled)
+    if plugin_id in builtin_plugins.BUILTINS:
+        if plugin_id == "fixed_reply" and not settings.reply.strip():
+            raise HTTPException(422, "回复文字不能为空")
+        builtin_plugins.save(group_id, plugin_id, settings)
+    else:
+        automation.set_group_plugin(group_id, plugin_id, settings.enabled)
     log.info("desktop_group_plugin_changed", group_id=group_id, plugin_id=plugin_id, enabled=settings.enabled)
-    return {"id": plugin_id, **PLUGINS[plugin_id], "enabled": settings.enabled}
+    return next(item for item in list_group_plugins(group_id) if item["id"] == plugin_id)
 
 
 @router.post("/monitored-groups/{group_id}/test-send")
@@ -378,7 +391,8 @@ def test_send_to_group(group_id: str) -> dict:
     group = next((item for item in automation.monitored_groups() if item["group_id"] == group_id), None)
     if not group or not group["enabled"]:
         raise HTTPException(409, "请先启用该群机器人")
-    if not automation.group_plugins(group_id).get("fixed_reply", True):
+    plugin = builtin_plugins.config(group_id, "fixed_reply", automation.group_plugins(group_id))
+    if not plugin.enabled:
         raise HTTPException(409, "请先启用该群的「测试消息」插件")
     if not test_send_lock.acquire(blocking=False):
         raise HTTPException(409, "已有测试消息正在发送")
@@ -387,12 +401,10 @@ def test_send_to_group(group_id: str) -> dict:
         target = details.get("original_name") or details.get("remark") or group["name"]
         if target == group_id:
             raise SourceError("未取得群名称，无法核对手机聊天标题")
-        event = MessageEvent(group_id=group_id, message_id="manual-test", sender_id="local",
-                             timestamp_ms=1, text="测试")
-        reply = HANDLERS["fixed_reply"](event)
+        reply_text = plugin.reply
         sender = create_sender(dry_run=False)
         sender.connect()
-        if not sender.send(target, reply.content.text, current_chat=True):
+        if not sender.send(target, reply_text, current_chat=True):
             raise SendError("发送后未能确认结果，请先在手机查看，避免重复发送")
     except (SourceError, SendError) as exc:
         log.warning("group_test_send_failed", group_id=group_id, error=str(exc))

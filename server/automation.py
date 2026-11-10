@@ -196,7 +196,7 @@ class Automation:
                 "DO UPDATE SET message_id=excluded.message_id", (group_id, message_id),
             )
 
-    def dispatch(self, event: MessageEvent) -> Literal["unmatched", "duplicate", "pending", "acknowledged", "failed"]:
+    def dispatch(self, event: MessageEvent, *, skip_fixed=False) -> Literal["unmatched", "duplicate", "pending", "acknowledged", "failed"]:
         with self.database() as db:
             row = db.execute(
                 "SELECT config FROM rules WHERE group_id=? AND keyword=?",
@@ -205,13 +205,17 @@ class Automation:
             if row is None:
                 return "unmatched"
             rule = Rule.model_validate_json(row["config"])
-            if not rule.enabled:
+            if not rule.enabled or (skip_fixed and rule.handler == "fixed_reply"):
                 return "unmatched"
             plugin = db.execute(
                 "SELECT enabled FROM group_plugins WHERE group_id=? AND plugin_id=?",
                 (event.group_id, rule.handler),
             ).fetchone()
             enabled = bool(plugin["enabled"]) if plugin is not None else PLUGINS[rule.handler]["default_enabled"]
+            if rule.handler == "fixed_reply":
+                from .group_plugins import config
+
+                enabled = config(event.group_id, rule.handler, {rule.handler: enabled}).enabled
             if not enabled:
                 return "unmatched"
             inserted = db.execute(
