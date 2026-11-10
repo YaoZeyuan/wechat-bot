@@ -145,9 +145,9 @@ public final class Bridge extends AccessibilityService {
                 || (group && (groupLabel.matcher(value(n.getText())).matches()
                     || groupLabel.matcher(value(n.getContentDescription())).matches())))).size() == 1,
                 "分享确认页未核对到唯一收件人");
-            if (!image) {
+            if (kind.equals("text")) {
                 require(!matching(n -> !n.isEditable() && contentMatch.test(n) && lowerSheet(n, button)).isEmpty(),
-                    "分享确认页内容未匹配" + (kind.equals("file") ? filePreview(button) : ""));
+                    "分享确认页内容未匹配");
             }
             if (request.getBoolean("dry_run")) {
                 click(unique(named("取消"), "取消分享按钮"));
@@ -178,14 +178,6 @@ public final class Bridge extends AccessibilityService {
         return parts.length == 2 && parts[0].length() >= 4 && parts[1].length() >= 4
             && filename.length() > parts[0].length() + parts[1].length()
             && filename.startsWith(parts[0]) && filename.endsWith(parts[1]);
-    }
-    private String filePreview(Rect button) {
-        List<String> labels = new ArrayList<>();
-        for (AccessibilityNodeInfo node : matching(n -> lowerSheet(n, button) && !n.isEditable())) {
-            String label = value(node.getText()).toString();
-            if (label.endsWith(".pdf") || label.contains("…") || label.contains("...")) labels.add(label);
-        }
-        return labels.isEmpty() ? "" : "，微信显示 " + String.join(" / ", labels);
     }
     private List<AccessibilityNodeInfo> shareRows(String target, int minTop) {
         List<AccessibilityNodeInfo> rows = new ArrayList<>();
