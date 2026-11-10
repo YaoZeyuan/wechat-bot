@@ -93,6 +93,12 @@ function chooseConversation() {
   target.value = selected?.name ?? ''
 }
 const attachments = ref<File[]>([])
+const attachmentInput = ref<HTMLInputElement>()
+
+function clearAttachments() {
+  attachments.value = []
+  if (attachmentInput.value) attachmentInput.value.value = ''
+}
 
 function pickFiles(event: Event) {
   attachments.value = Array.from((event.target as HTMLInputElement).files ?? [])
@@ -298,8 +304,12 @@ onUnmounted(() => {
           <textarea v-model="text" rows="8" placeholder="输入要发送的内容，支持中文与多行"></textarea>
         </label>
         <label>附件（PNG、JPEG、TXT、PDF）
-          <input type="file" multiple accept=".png,.jpg,.jpeg,.txt,.pdf" @change="pickFiles" />
+          <input ref="attachmentInput" type="file" multiple accept=".png,.jpg,.jpeg,.txt,.pdf"
+            :disabled="busy" @change="pickFiles" />
         </label>
+        <button v-if="attachments.length" type="button" class="ghost" :disabled="busy" @click="clearAttachments">
+          清空附件
+        </button>
         <label class="check">
           <input type="checkbox" v-model="dryRun" />
           仅演练（填入输入框但不点击发送）
