@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { api } from './api'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { api, type Conversation } from './api'
 import type { HealthResponse, LogItem, Stats } from './types'
 
 const health = ref<HealthResponse | null>(null)
@@ -48,6 +48,50 @@ const text = ref('')
 const dryRun = ref(true)
 const kind = ref<'contact' | 'group' | 'file_helper'>('file_helper')
 const targetId = ref('')
+const conversationQuery = ref('')
+const conversations = ref<Conversation[]>([])
+const selectedConversation = ref<Conversation>()
+const moreConversations = ref(false)
+const loadingConversations = ref(false)
+const conversationError = ref('')
+let conversationRequest = 0
+
+async function loadConversations(append = false) {
+  const request = ++conversationRequest
+  if (!append) conversations.value = []
+  conversationError.value = ''
+  if (kind.value === 'file_helper') {
+    loadingConversations.value = false
+    return
+  }
+  loadingConversations.value = true
+  try {
+    const page = await api.conversations(conversationQuery.value.trim(),
+      kind.value === 'group' ? 'group' : 'private', append ? conversations.value.length : 0)
+    if (request !== conversationRequest) return
+    conversations.value.push(...page.items)
+    moreConversations.value = page.has_more
+  } catch (cause) {
+    if (request === conversationRequest) {
+      conversationError.value = cause instanceof Error ? cause.message : String(cause)
+    }
+  } finally {
+    if (request === conversationRequest) loadingConversations.value = false
+  }
+}
+
+watch(kind, () => {
+  targetId.value = ''
+  selectedConversation.value = undefined
+  conversationQuery.value = ''
+  void loadConversations()
+})
+
+function chooseConversation() {
+  const selected = conversations.value.find(item => item.id === targetId.value)
+  selectedConversation.value = selected
+  target.value = selected?.name ?? ''
+}
 const attachments = ref<File[]>([])
 
 function pickFiles(event: Event) {
@@ -108,7 +152,7 @@ async function loadConfig(): Promise<void> {
       step_delay: Number(cfg.step_delay ?? 0.6),
       dry_run: Boolean(cfg.dry_run),
     }
-    if (!target.value) target.value = form.value.default_target
+    if (!targetId.value) target.value = form.value.default_target
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   }
@@ -219,18 +263,37 @@ onUnmounted(() => {
       <section class="card">
         <h2>发送消息</h2>
         <label>会话类型
-          <select v-model="kind">
+          <select v-model="kind" :disabled="busy">
             <option value="file_helper">文件传输助手</option>
             <option value="contact">联系人</option>
             <option value="group">群聊</option>
           </select>
         </label>
-        <label v-if="kind !== 'file_helper'">会话 ID
-          <input v-model="targetId" />
-        </label>
-        <label v-if="kind !== 'file_helper'">目标会话
-          <input v-model="target" placeholder="群名或文件传输助手" />
-        </label>
+        <template v-if="kind !== 'file_helper'">
+          <label>查找会话
+            <div class="row">
+              <input v-model="conversationQuery" placeholder="输入联系人或群聊名称"
+                :disabled="busy" @keydown.enter.prevent="loadConversations()" />
+              <button class="ghost" :disabled="busy || loadingConversations" @click="loadConversations()">查找</button>
+            </div>
+          </label>
+          <label>目标会话
+            <select v-model="targetId" :disabled="busy || loadingConversations" @change="chooseConversation">
+              <option value="">{{ loadingConversations ? '正在读取会话…' : '请选择会话' }}</option>
+              <option v-if="selectedConversation && !conversations.some(item => item.id === selectedConversation?.id)"
+                :value="selectedConversation.id">{{ selectedConversation.name }}</option>
+              <option v-for="item in conversations" :key="item.id" :value="item.id">
+                {{ item.name }}（{{ item.id }}）
+              </option>
+            </select>
+          </label>
+          <button v-if="moreConversations" class="ghost" :disabled="busy || loadingConversations"
+            @click="loadConversations(true)">加载更多</button>
+          <p v-if="conversationError" class="message error">{{ conversationError }}</p>
+          <label v-if="targetId">手机端会话名称
+            <input v-model="target" :disabled="busy" />
+          </label>
+        </template>
         <label>文本
           <textarea v-model="text" rows="8" placeholder="输入要发送的内容，支持中文与多行"></textarea>
         </label>
