@@ -2,4 +2,5 @@
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
     android:packageNames="com.tencent.mm"
     android:accessibilityFlags="flagReportViewIds"
+    android:canPerformGestures="true"
     android:canRetrieveWindowContent="true" />

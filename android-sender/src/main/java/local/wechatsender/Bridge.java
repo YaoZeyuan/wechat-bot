@@ -16,6 +16,7 @@ import org.json.JSONObject;
 public final class Bridge extends AccessibilityService {
     private static final String WECHAT = "com.tencent.mm";
     private LocalServerSocket listener;
+    private String preparedTarget;
 
     @Override protected void onServiceConnected() {
         try {
@@ -65,14 +66,16 @@ public final class Bridge extends AccessibilityService {
         String target = request.getString("target");
         if (action.equals("share")) return shareAsset(request, target, clicked);
         if (action.equals("prepare")) {
+            preparedTarget = null;
             if (!inChat(target)) locate(target);
-            require(inChat(target), "会话校验失败，标题匹配数 " + titles(target).size()
+            preparedTarget = target;
+            require(chatReady(target), "会话校验失败，标题匹配数 " + titles(target).size()
                 + "，可编辑控件数 " + matching(AccessibilityNodeInfo::isEditable).size()
                 + "，页面控件：" + pageShape(target));
             return new JSONObject();
         }
         require(action.equals("text"), "未知操作");
-        require(inChat(target), "当前会话标题未匹配");
+        require(chatReady(target), "当前会话标题未匹配");
         AccessibilityNodeInfo input = unique(n -> n.isEditable(), "聊天输入框");
         clearDraft(input);
         String text = request.getString("text");
@@ -82,12 +85,12 @@ public final class Bridge extends AccessibilityService {
         if (dryRun) {
             setText(unique(n -> n.isEditable(), "聊天输入框"), "");
         } else {
-            require(inChat(target), "发送前会话标题未匹配");
+            require(chatReady(target), "发送前会话标题未匹配");
             AccessibilityNodeInfo send = unique(named("发送"), "发送按钮");
             clicked[0] = true;
             click(send);
             pause();
-            require(inChat(target), "发送后会话标题未匹配");
+            require(chatReady(target), "发送后会话标题未匹配");
             require(matching(n -> !n.isEditable() && text.contentEquals(value(n.getText()))).size() > before,
                 "已点击发送，但未核对到完整文本");
         }
@@ -285,6 +288,12 @@ public final class Bridge extends AccessibilityService {
         });
     }
 
+    private boolean chatReady(String target) {
+        if (inChat(target)) return true;
+        return "文件传输助手".equals(target) && target.equals(preparedTarget)
+            && matching(n -> n.isEditable() && "com.tencent.mm:id/bkk".equals(n.getViewIdResourceName())).size() == 1
+            && matching(n -> "com.tencent.mm:id/fq".equals(n.getViewIdResourceName()) && named("聊天信息").test(n)).size() == 1;
+    }
     private boolean inChat(String name) {
         return !titles(name).isEmpty() && matching(AccessibilityNodeInfo::isEditable).size() == 1;
     }
