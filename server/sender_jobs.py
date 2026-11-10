@@ -127,6 +127,28 @@ def get_job(request_id: UUID):
     return json.loads(row[0])
 
 
+def resolve_target(target: Target) -> str:
+    if target.kind == "file_helper":
+        return "文件传输助手"
+    if target.kind != "group":
+        return target.name
+
+    from server.reader import history_source
+
+    source = history_source()
+    lookup = source.sessions(q=target.id, limit=50)
+    group = next((item for item in lookup["items"] if item["sessionId"] == target.id), None)
+    if group is None:
+        raise ValueError("电脑端群列表中找不到目标群 ID，请重新选择会话")
+    name = group["displayName"]
+    if target.name.strip() != name:
+        raise ValueError(f"目标群当前显示名是「{name}」，请刷新会话列表后重新选择")
+    matches = source.sessions(q=name, limit=50)
+    same_name = [item for item in matches["items"] if item["displayName"].strip().casefold() == name.strip().casefold()]
+    if matches["hasMore"] or len(same_name) != 1 or same_name[0]["sessionId"] != target.id:
+        raise ValueError(f"无法确认「{name}」是唯一群名，请为目标群设置唯一备注后重试")
+    return name
+
 def run(job, result):
     from server.main import _devices, create_sender, sender_console_lock, sender_log
 
@@ -144,6 +166,9 @@ def run(job, result):
         try:
             result["status"] = "running"
             progress("检查任务附件和手机连接")
+            target = resolve_target(job.target)
+            if job.target.kind == "group":
+                progress(f"电脑端已核对群 ID 和唯一显示名「{target}」")
             assets = {}
             for item in job.messages:
                 if isinstance(item, AssetMessage):
@@ -162,14 +187,13 @@ def run(job, result):
                 raise ValueError("附件发送需要手机无障碍通道")
             phone.on_progress = progress
             phone.connect()
-            target = "文件传输助手" if job.target.kind == "file_helper" else job.target.name
 
             for index, item in enumerate(job.messages):
                 progress(f"处理第 {index + 1} 条消息")
                 sending = job.mode == "send"
                 if isinstance(item, TextMessage):
                     if hasattr(phone, "share_text"):
-                        ok = phone.share_text(target, item.text)
+                        ok = phone.share_text(target, item.text, group=job.target.kind == "group")
                     else:
                         phone.prepare_chat(target)
                         ok = phone.send(target, item.text, current_chat=True)

@@ -127,7 +127,12 @@ public final class Bridge extends AccessibilityService {
         AccessibilityNodeInfo send = unique(named("发送"), "分享确认发送按钮");
         Rect button = new Rect();
         send.getBoundsInScreen(button);
-        require(matching(n -> named(target).test(n) && lowerSheet(n, button)).size() == 1,
+        java.util.regex.Pattern groupLabel = java.util.regex.Pattern.compile(
+            java.util.regex.Pattern.quote(target) + "\\s*[（(]\\d+人[）)]");
+        boolean group = request.optBoolean("group");
+        require(matching(n -> lowerSheet(n, button) && (named(target).test(n)
+            || (group && (groupLabel.matcher(value(n.getText())).matches()
+                || groupLabel.matcher(value(n.getContentDescription())).matches())))).size() == 1,
             "分享确认页未核对到唯一收件人");
         if (!image) {
             require(matching(n -> named(content).test(n) && lowerSheet(n, button)).size() == 1,

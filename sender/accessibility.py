@@ -135,12 +135,12 @@ class AccessibilitySender:
             raise SendError("请先将目标微信打开到前台")
         return active.group(1)
 
-    def share_text(self, target, text):
+    def share_text(self, target, text, *, group=False):
         text = normalize_text(text)
         if not text.strip() or len(text) > self.max_chars:
             raise SendError(f"文字不能为空，且最多 {self.max_chars} 字")
         return self.share(self.share_user(), target, "text/plain", "text",
-                          ["--es", "android.intent.extra.TEXT", text], text=text)
+                          ["--es", "android.intent.extra.TEXT", text], text=text, group=group)
 
     def share(self, user, target, mime, kind, extras, **payload):
         import time
