@@ -175,13 +175,13 @@ async function doSend(): Promise<void> {
   void captureScreen()
   try {
     const messages: ({ type: 'text'; text: string } | { type: 'image' | 'file'; asset_id: string })[] = []
-    if (text.value.trim()) messages.push({ type: 'text', text: text.value })
     for (const file of attachments.value) {
       steps.value.push('正在上传附件 ' + file.name)
       const assetId = crypto.randomUUID()
       await api.uploadSenderAsset(assetId, file)
       messages.push({ type: /\.(png|jpe?g)$/i.test(file.name) ? 'image' : 'file', asset_id: assetId })
     }
+    if (text.value.trim()) messages.push({ type: 'text', text: text.value })
     const requestId = crypto.randomUUID()
     const helper = kind.value === 'file_helper'
     let result = await api.submitSenderJob({
