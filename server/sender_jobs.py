@@ -199,7 +199,7 @@ def run(job, result):
                         ok = phone.send(target, item.text, current_chat=True)
                 else:
                     path, filename = assets[item.asset_id]
-                    ok = phone.send_asset(target, item.type, path, filename)
+                    ok = phone.send_asset(target, item.type, path, filename, group=job.target.kind == "group")
                 if not ok:
                     result["items"][index] = "uncertain"
                     result["status"] = "uncertain"

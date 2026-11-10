@@ -69,7 +69,7 @@ class AccessibilitySender:
         self.progress(result.get("error", "演练已清理输入框" if self.dry_run else "手机已核对发送后的完整文本"))
         return ok
 
-    def send_asset(self, target, kind, path, filename):
+    def send_asset(self, target, kind, path, filename, *, group=False):
         import mimetypes
         import re
         import shlex
@@ -115,7 +115,7 @@ class AccessibilitySender:
             self.progress("已校验附件内容，正在打开微信系统分享")
             return self.share(user, target, mime, kind,
                               ["--grant-read-uri-permission", "--eu", "android.intent.extra.STREAM", uri],
-                              filename=filename)
+                              filename=filename, group=group)
         finally:
             try:
                 shell(*content("delete", uri))
@@ -166,6 +166,25 @@ class AccessibilitySender:
             raise SendError("等待微信分享页面超时，未发送消息")
 
         self.progress("正在核对微信分享确认页上的收件人和内容")
-        result = self.call("share", target=target, kind=kind, dry_run=self.dry_run, **payload)
-        self.progress(result.get("error", "系统分享操作已完成"))
-        return result["ok"]
+        try:
+            result = self.call("share", target=target, kind=kind, dry_run=self.dry_run, **payload)
+            self.progress(result.get("error", "系统分享操作已完成"))
+            return result["ok"]
+        finally:
+            try:
+                self.leave_share(user)
+            except Exception:
+                self.progress("微信分享页面未能自动退出，请在手机上返回")
+
+    def leave_share(self, user):
+        import time
+
+        for _ in range(4):
+            active = self.foreground()
+            if not active or active.group(1) != user or active.group(2) != "com.tencent.mm":
+                return
+            activity = active.group(3).rsplit(".", 1)[-1]
+            if activity not in {"MvvmContactListUI", "SelectConversationUI", "SendAppMessageWrapperUI", "ShareImgUI", "ConvBoxTransmitUI"}:
+                return
+            self.device.shell(["input", "keyevent", "KEYCODE_BACK"], timeout=5)
+            time.sleep(0.4)

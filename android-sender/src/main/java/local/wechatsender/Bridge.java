@@ -101,27 +101,32 @@ public final class Bridge extends AccessibilityService {
         String content = kind.equals("text") ? request.getString("text") : request.optString("filename");
         Rect recent = new Rect();
         unique(named("最近聊天"), "最近聊天分区").getBoundsInScreen(recent);
-        List<AccessibilityNodeInfo> rows = new ArrayList<>();
-        for (AccessibilityNodeInfo node : matching(n -> !n.isEditable() && target.contentEquals(value(n.getText())))) {
-            Rect label = new Rect();
-            node.getBoundsInScreen(label);
-            if (label.top < recent.bottom) continue;
-            AccessibilityNodeInfo row = clickable(node);
-            if (row == null) continue;
-            Rect bounds = new Rect();
-            row.getBoundsInScreen(bounds);
-            boolean duplicate = false;
-            for (AccessibilityNodeInfo prior : rows) {
-                Rect other = new Rect();
-                prior.getBoundsInScreen(other);
-                if (Math.abs(bounds.centerY() - other.centerY()) < Math.min(bounds.height(), other.height()) / 3) {
-                    duplicate = true;
-                    break;
+        List<AccessibilityNodeInfo> rows = shareRows(target, recent.bottom);
+        if (rows.isEmpty() && request.optBoolean("group")) {
+            List<AccessibilityNodeInfo> folded = shareRows("折叠的聊天", recent.bottom);
+            if (folded.size() == 1) {
+                click(folded.get(0));
+                pause();
+                rows = shareRows(target, 0);
+                if (rows.isEmpty()) {
+                    require(performGlobalAction(GLOBAL_ACTION_BACK), "无法退出折叠列表");
+                    pause();
                 }
             }
-            if (!duplicate) rows.add(row);
         }
-        require(rows.size() == 1, "分享会话文本行匹配数为 " + rows.size());
+        if (rows.isEmpty()) {
+            List<AccessibilityNodeInfo> inputs = matching(AccessibilityNodeInfo::isEditable);
+            if (inputs.isEmpty()) {
+                click(unique(named("搜索"), "微信分享搜索入口"));
+                pause();
+            }
+            AccessibilityNodeInfo query = unique(AccessibilityNodeInfo::isEditable, "微信分享搜索框");
+            setText(query, target);
+            Rect bounds = new Rect();
+            query.getBoundsInScreen(bounds);
+            rows = shareRows(target, bounds.bottom);
+        }
+        require(rows.size() == 1, "分享会话匹配数为 " + rows.size() + "，请确认手机备注唯一且可搜索");
         click(rows.get(0));
         pause();
         AccessibilityNodeInfo send = unique(named("发送"), "分享确认发送按钮");
@@ -153,6 +158,30 @@ public final class Bridge extends AccessibilityService {
             }
         }
         throw new IOException("已点击分享发送，但未核对到消息，请在会话中确认");
+    }
+
+    private List<AccessibilityNodeInfo> shareRows(String target, int minTop) {
+        List<AccessibilityNodeInfo> rows = new ArrayList<>();
+        for (AccessibilityNodeInfo node : matching(n -> !n.isEditable() && target.contentEquals(value(n.getText())))) {
+            Rect label = new Rect();
+            node.getBoundsInScreen(label);
+            if (label.top < minTop) continue;
+            AccessibilityNodeInfo row = clickable(node);
+            if (row == null) continue;
+            Rect bounds = new Rect();
+            row.getBoundsInScreen(bounds);
+            boolean duplicate = false;
+            for (AccessibilityNodeInfo prior : rows) {
+                Rect other = new Rect();
+                prior.getBoundsInScreen(other);
+                if (Math.abs(bounds.centerY() - other.centerY()) < Math.min(bounds.height(), other.height()) / 3) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) rows.add(row);
+        }
+        return rows;
     }
 
     private boolean lowerSheet(AccessibilityNodeInfo node, Rect button) {
