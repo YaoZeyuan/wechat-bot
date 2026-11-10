@@ -228,3 +228,17 @@ uv run python -m server.export_history --snapshot local-data/snapshot --account 
 - [MaiBot（麦麦）](https://github.com/Mai-with-u/MaiBot)。参考了 WebUI 将运行状态、配置和执行记录分区的方式。
 - [Arco Design Vue](https://github.com/arco-design/arco-design-vue)。用于后台导航及界面组件。
 - [android-rpa](https://github.com/1parado/android-rpa)。参考了手机微信搜索控件候选和过滤搜索框、定位会话结果的方式。
+
+## 手机无障碍 Sender
+
+在 `android-sender` 目录用 Android Studio 或 Gradle 8.2 构建
+`assembleDebug`，安装 APK 后，在手机系统的无障碍设置中启用
+「WeChat Sender」。将项目根目录的本机 `config.json` 中的
+`sender_channel` 改成 `accessibility`。先结束旧的 uiautomator2
+会话，再将所需的微信实例切到前台。从 Web 的 Sender 页先做一次文字演练，
+步骤日志会显示手机服务读到的微信可见节点数。
+
+手机服务经 ADB 转发接收命令，使用 Android 无障碍控件定位和校验。
+现阶段支持文字演练和发送。原版和双开版的可读性需要在目标手机上分别验证。
+
+参考项目 [wechat-rpa-demo](https://github.com/AbbottKilig/wechat-rpa-demo)。

@@ -1,0 +1,11 @@
+plugins { id 'com.android.application' version '8.2.2' }
+android {
+    namespace 'local.wechatsender'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'local.wechatsender'
+        minSdk 26
+        targetSdk 34
+    }
+}
+

@@ -5,7 +5,7 @@
   config.py  配置加载与 adb 环境
   text.py    文本规范化与校验探针
   store.py   SQLite 发送日志
-  u2.py      uiautomator2 实现（当前唯一通道）
+  u2.py      uiautomator2 实现
 
 新增发送通道：实现 Sender 协议，在 create_sender 里注册一行即可。
 """
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .accessibility import AccessibilitySender
 from .base import SendError, Sender
 from .config import CONFIG_PATH, DEFAULT_CONFIG, ROOT, load_config, setup_adb
 from .store import init_db, log_send
@@ -31,7 +32,9 @@ def create_sender(
     channel = channel or cfg.get("sender_channel", "u2")
     if channel == "u2":
         return U2Sender(cfg=cfg, serial=serial, dry_run=dry_run)
-    raise SendError(f"未知发送通道：{channel}（当前只注册了 u2）")
+    if channel == "accessibility":
+        return AccessibilitySender(cfg=cfg, serial=serial, dry_run=dry_run)
+    raise SendError(f"未知发送通道：{channel}")
 
 
 __all__ = [
