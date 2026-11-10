@@ -68,3 +68,85 @@ class AccessibilitySender:
             conn.close()
         self.progress(result.get("error", "演练已清理输入框" if self.dry_run else "手机已核对发送后的完整文本"))
         return ok
+
+    def send_asset(self, target, kind, path, filename):
+        import mimetypes
+        import re
+        import shlex
+        import subprocess
+        import time
+        from uuid import uuid4
+
+        from adbutils._utils import adb_path
+
+        def focus():
+            windows = self.device.shell(["dumpsys", "window"], timeout=5)
+            return re.search(r"mCurrentFocus=Window\{[^\r\n]*\bu(\d+) ([\w.]+)/([^}\s]+)", windows)
+
+        active = focus()
+        if active is None or active.group(2) != "com.tencent.mm":
+            raise SendError("请先将目标微信打开到前台")
+        user = active.group(1)
+        mime = mimetypes.guess_type(filename)[0]
+        if mime not in {"text/plain", "application/pdf", "image/png", "image/jpeg"}:
+            raise SendError("附件媒体类型不受支持")
+        directory = f"Download/WeChatSender-{uuid4().hex}/"
+        collection = "content://media/external/downloads"
+
+        def content(action, uri, *args):
+            return ["content", action, "--user", user, "--uri", uri, *args]
+
+        def shell(*args):
+            return self.device.shell(list(args), timeout=10)
+
+        self.progress(f"正在为 Android 系统分享准备附件：{filename}")
+        shell(*content("insert", collection, "--bind", f"_display_name:s:{filename}",
+                       "--bind", f"mime_type:s:{mime}", "--bind", f"relative_path:s:{directory}"))
+        rows = shell(*content("query", collection, "--projection", "_id:_data",
+                              "--where", f"relative_path='{directory}'"))
+        entries = re.findall(r"_id=(\d+), _data=(/storage/emulated/\d+/Download/[^\r\n]+)", rows)
+        if len(entries) != 1:
+            raise SendError("Android 未返回唯一的附件共享地址")
+        row_id, remote = entries[0]
+        if not remote.endswith(f"/{directory}{filename}"):
+            raise SendError("Android 返回的共享路径与本次附件不一致")
+        uri = f"{collection}/{row_id}"
+        adb = [adb_path(), "-s", self.device.serial]
+        try:
+            data = path.read_bytes()
+            shell("mkdir", "-p", remote.rsplit("/", 1)[0])
+            self.device.sync.push(str(path), remote)
+            copied = subprocess.check_output([*adb, "exec-out", shlex.join(content("read", uri))], timeout=30)
+            if copied != data:
+                raise SendError(f"手机上的共享附件未通过内容校验（预期 {len(data)} 字节，实际 {len(copied)} 字节）")
+
+            self.progress("已校验附件内容，正在打开微信系统分享")
+            output = shell("am", "start", "-W", "--user", user, "-n", "com.tencent.mm/.ui.tools.ShareImgUI",
+                           "-a", "android.intent.action.SEND", "-t", mime,
+                           "--grant-read-uri-permission", "--eu", "android.intent.extra.STREAM", uri)
+            if "Error:" in output or "Exception" in output:
+                raise SendError("Android 无法打开微信分享页面")
+
+            prompted = False
+            for _ in range(90):
+                active = focus()
+                if active and active.group(1) == user and active.group(2) == "com.tencent.mm":
+                    if self.call("share_status")["ready"]:
+                        break
+                if active and "XSpaceResolveActivity" in active.group(3) and not prompted:
+                    self.progress("检测到双开微信，请在手机上选择原先处于前台的微信实例")
+                    prompted = True
+                time.sleep(1)
+            else:
+                raise SendError("等待微信分享页面超时，未发送附件")
+
+            self.progress("正在核对微信分享确认页上的收件人和附件")
+            result = self.call("share", target=target, kind=kind, filename=filename, dry_run=self.dry_run)
+            self.progress(result.get("error", "系统分享操作已完成"))
+            return result["ok"]
+        finally:
+            try:
+                shell(*content("delete", uri))
+                shell("rmdir", remote.rsplit("/", 1)[0])
+            except Exception:
+                self.progress("手机端临时分享文件清理失败")

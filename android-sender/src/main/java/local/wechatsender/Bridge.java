@@ -59,7 +59,11 @@ public final class Bridge extends AccessibilityService {
         if (action.equals("status")) {
             return new JSONObject().put("nodes", nodes().size());
         }
+        if (action.equals("share_status")) {
+            return new JSONObject().put("ready", !matching(named("选择聊天")).isEmpty());
+        }
         String target = request.getString("target");
+        if (action.equals("share")) return shareAsset(request, target, clicked);
         if (action.equals("prepare")) {
             if (!inChat(target)) locate(target);
             require(inChat(target), "会话校验失败，标题匹配数 " + titles(target).size()
@@ -70,8 +74,7 @@ public final class Bridge extends AccessibilityService {
         require(action.equals("text"), "未知操作");
         require(inChat(target), "当前会话标题未匹配");
         AccessibilityNodeInfo input = unique(n -> n.isEditable(), "聊天输入框");
-        require(input.getText() == null || input.getText().length() == 0 || input.isShowingHintText(),
-            "输入框已有草稿");
+        clearDraft(input);
         String text = request.getString("text");
         boolean dryRun = request.getBoolean("dry_run");
         int before = matching(n -> !n.isEditable() && text.contentEquals(value(n.getText()))).size();
@@ -89,6 +92,68 @@ public final class Bridge extends AccessibilityService {
                 "已点击发送，但未核对到完整文本");
         }
         return new JSONObject();
+    }
+
+    private JSONObject shareAsset(JSONObject request, String target, boolean[] clicked) throws Exception {
+        require(!matching(named("选择聊天")).isEmpty(), "未确认微信分享会话选择页");
+        String filename = request.getString("filename");
+        boolean image = request.getString("kind").equals("image");
+        Rect recent = new Rect();
+        unique(named("最近聊天"), "最近聊天分区").getBoundsInScreen(recent);
+        List<AccessibilityNodeInfo> rows = new ArrayList<>();
+        for (AccessibilityNodeInfo node : matching(n -> !n.isEditable() && target.contentEquals(value(n.getText())))) {
+            Rect label = new Rect();
+            node.getBoundsInScreen(label);
+            if (label.top < recent.bottom) continue;
+            AccessibilityNodeInfo row = clickable(node);
+            if (row == null) continue;
+            Rect bounds = new Rect();
+            row.getBoundsInScreen(bounds);
+            boolean duplicate = false;
+            for (AccessibilityNodeInfo prior : rows) {
+                Rect other = new Rect();
+                prior.getBoundsInScreen(other);
+                if (Math.abs(bounds.centerY() - other.centerY()) < Math.min(bounds.height(), other.height()) / 3) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) rows.add(row);
+        }
+        require(rows.size() == 1, "分享会话文本行匹配数为 " + rows.size());
+        click(rows.get(0));
+        pause();
+        AccessibilityNodeInfo send = unique(named("发送"), "分享确认发送按钮");
+        Rect button = new Rect();
+        send.getBoundsInScreen(button);
+        require(matching(n -> named(target).test(n) && lowerSheet(n, button)).size() == 1,
+            "分享确认页未核对到唯一收件人");
+        if (!image) {
+            require(matching(n -> named(filename).test(n) && lowerSheet(n, button)).size() == 1,
+                "分享确认页附件文件名未匹配");
+        }
+        if (request.getBoolean("dry_run")) {
+            click(unique(named("取消"), "取消分享按钮"));
+            return new JSONObject();
+        }
+        clicked[0] = true;
+        click(send);
+        for (int attempt = 0; attempt < 8; attempt++) {
+            pause();
+            if (matching(named("选择聊天")).isEmpty()
+                && !matching(AccessibilityNodeInfo::isEditable).isEmpty()
+                && !matching(image ? named("图片") : named(filename)).isEmpty()) {
+                return new JSONObject();
+            }
+        }
+        throw new IOException("已点击分享发送，但未核对到附件消息，请在会话中确认");
+    }
+
+    private boolean lowerSheet(AccessibilityNodeInfo node, Rect button) {
+        Rect bounds = new Rect();
+        node.getBoundsInScreen(bounds);
+        return bounds.centerY() > getResources().getDisplayMetrics().heightPixels / 2
+            && bounds.bottom < button.top;
     }
 
     private void locate(String target) throws Exception {
@@ -231,6 +296,11 @@ public final class Bridge extends AccessibilityService {
         require(node != null && node.performAction(AccessibilityNodeInfo.ACTION_CLICK), "控件无法点击");
     }
 
+    private static void clearDraft(AccessibilityNodeInfo input) throws Exception {
+        if (!input.isShowingHintText() && value(input.getText()).length() > 0) {
+            setText(input, "");
+        }
+    }
     private static void setText(AccessibilityNodeInfo node, String text) throws Exception {
         Bundle args = new Bundle();
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);

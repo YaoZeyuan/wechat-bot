@@ -79,6 +79,9 @@ def screen():
 
 @router.put("/assets/{asset_id}")
 async def upload(asset_id: UUID, filename: str, request: Request):
+    filename = Path(filename.replace(chr(92), "/")).name
+    if not filename or len(filename.encode("utf-8")) > 200 or any(ord(ch) < 32 for ch in filename):
+        raise HTTPException(422, "附件文件名无效")
     suffix = Path(filename).suffix.lower()
     if suffix not in {".png", ".jpg", ".jpeg", ".txt", ".pdf"}:
         raise HTTPException(422, "附件仅支持 PNG、JPEG、TXT、PDF")
@@ -95,6 +98,7 @@ async def upload(asset_id: UUID, filename: str, request: Request):
     except FileExistsError as exc:
         raise HTTPException(409, "附件 ID 已存在") from exc
     (folder / ("asset" + suffix)).write_bytes(data)
+    (folder / "filename.json").write_text(json.dumps(filename), encoding="utf-8")
     return {"asset_id": asset_id}
 
 
@@ -140,32 +144,40 @@ def run(job, result):
         try:
             result["status"] = "running"
             progress("检查任务附件和手机连接")
+            assets = {}
             for item in job.messages:
                 if isinstance(item, AssetMessage):
                     extensions = {".png", ".jpg", ".jpeg"} if item.type == "image" else {".txt", ".pdf"}
                     files = list((root / "assets" / str(item.asset_id)).glob("asset.*"))
                     if len(files) != 1 or files[0].suffix not in extensions:
                         raise ValueError("附件不存在或类型与消息不匹配")
-                    if job.mode == "send":
-                        raise ValueError("手机端尚未接入附件实际发送")
+                    metadata = files[0].with_name("filename.json")
+                    filename = json.loads(metadata.read_text(encoding="utf-8")) if metadata.exists() else files[0].name
+                    assets[item.asset_id] = (files[0], filename)
             ready = [item for item in _devices() if item["state"] == "device"]
             if len(ready) != 1:
                 raise ValueError("请连接并授权一台手机")
             phone = create_sender(serial=ready[0]["serial"], dry_run=job.mode == "dry_run")
+            if assets and not hasattr(phone, "send_asset"):
+                raise ValueError("附件发送需要手机无障碍通道")
             phone.on_progress = progress
             phone.connect()
             target = "文件传输助手" if job.target.kind == "file_helper" else job.target.name
-            phone.prepare_chat(target)
-            progress("已核对目标会话")
+
             for index, item in enumerate(job.messages):
                 progress(f"处理第 {index + 1} 条消息")
+                sending = job.mode == "send"
                 if isinstance(item, TextMessage):
-                    sending = job.mode == "send"
-                    if not phone.send(target, item.text, current_chat=True):
-                        result["items"][index] = "uncertain"
-                        result["status"] = "uncertain"
-                        progress("发送结果待核对，请在手机上确认")
-                        return
+                    phone.prepare_chat(target)
+                    ok = phone.send(target, item.text, current_chat=True)
+                else:
+                    path, filename = assets[item.asset_id]
+                    ok = phone.send_asset(target, item.type, path, filename)
+                if not ok:
+                    result["items"][index] = "uncertain"
+                    result["status"] = "uncertain"
+                    progress("发送结果待核对，请在手机上确认")
+                    return
                 result["items"][index] = "checked" if job.mode == "dry_run" else "sent"
                 sending = False
             result["status"] = "completed"
