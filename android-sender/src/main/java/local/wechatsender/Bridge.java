@@ -60,7 +60,7 @@ public final class Bridge extends AccessibilityService {
             return new JSONObject().put("nodes", nodes().size());
         }
         if (action.equals("share_status")) {
-            return new JSONObject().put("ready", !matching(named("选择聊天")).isEmpty());
+            return new JSONObject().put("ready", !matching(named("最近聊天")).isEmpty());
         }
         String target = request.getString("target");
         if (action.equals("share")) return shareAsset(request, target, clicked);
@@ -95,9 +95,10 @@ public final class Bridge extends AccessibilityService {
     }
 
     private JSONObject shareAsset(JSONObject request, String target, boolean[] clicked) throws Exception {
-        require(!matching(named("选择聊天")).isEmpty(), "未确认微信分享会话选择页");
-        String filename = request.getString("filename");
-        boolean image = request.getString("kind").equals("image");
+        require(!matching(named("最近聊天")).isEmpty(), "未确认微信分享会话选择页");
+        String kind = request.getString("kind");
+        boolean image = kind.equals("image");
+        String content = kind.equals("text") ? request.getString("text") : request.optString("filename");
         Rect recent = new Rect();
         unique(named("最近聊天"), "最近聊天分区").getBoundsInScreen(recent);
         List<AccessibilityNodeInfo> rows = new ArrayList<>();
@@ -129,8 +130,8 @@ public final class Bridge extends AccessibilityService {
         require(matching(n -> named(target).test(n) && lowerSheet(n, button)).size() == 1,
             "分享确认页未核对到唯一收件人");
         if (!image) {
-            require(matching(n -> named(filename).test(n) && lowerSheet(n, button)).size() == 1,
-                "分享确认页附件文件名未匹配");
+            require(matching(n -> named(content).test(n) && lowerSheet(n, button)).size() == 1,
+                "分享确认页内容未匹配");
         }
         if (request.getBoolean("dry_run")) {
             click(unique(named("取消"), "取消分享按钮"));
@@ -140,13 +141,13 @@ public final class Bridge extends AccessibilityService {
         click(send);
         for (int attempt = 0; attempt < 8; attempt++) {
             pause();
-            if (matching(named("选择聊天")).isEmpty()
+            if (matching(named("最近聊天")).isEmpty()
                 && !matching(AccessibilityNodeInfo::isEditable).isEmpty()
-                && !matching(image ? named("图片") : named(filename)).isEmpty()) {
+                && !matching(image ? named("图片") : named(content)).isEmpty()) {
                 return new JSONObject();
             }
         }
-        throw new IOException("已点击分享发送，但未核对到附件消息，请在会话中确认");
+        throw new IOException("已点击分享发送，但未核对到消息，请在会话中确认");
     }
 
     private boolean lowerSheet(AccessibilityNodeInfo node, Rect button) {

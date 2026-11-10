@@ -168,8 +168,11 @@ def run(job, result):
                 progress(f"处理第 {index + 1} 条消息")
                 sending = job.mode == "send"
                 if isinstance(item, TextMessage):
-                    phone.prepare_chat(target)
-                    ok = phone.send(target, item.text, current_chat=True)
+                    if hasattr(phone, "share_text"):
+                        ok = phone.share_text(target, item.text)
+                    else:
+                        phone.prepare_chat(target)
+                        ok = phone.send(target, item.text, current_chat=True)
                 else:
                     path, filename = assets[item.asset_id]
                     ok = phone.send_asset(target, item.type, path, filename)

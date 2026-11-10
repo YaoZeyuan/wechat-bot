@@ -74,19 +74,11 @@ class AccessibilitySender:
         import re
         import shlex
         import subprocess
-        import time
         from uuid import uuid4
 
         from adbutils._utils import adb_path
 
-        def focus():
-            windows = self.device.shell(["dumpsys", "window"], timeout=5)
-            return re.search(r"mCurrentFocus=Window\{[^\r\n]*\bu(\d+) ([\w.]+)/([^}\s]+)", windows)
-
-        active = focus()
-        if active is None or active.group(2) != "com.tencent.mm":
-            raise SendError("请先将目标微信打开到前台")
-        user = active.group(1)
+        user = self.share_user()
         mime = mimetypes.guess_type(filename)[0]
         if mime not in {"text/plain", "application/pdf", "image/png", "image/jpeg"}:
             raise SendError("附件媒体类型不受支持")
@@ -121,32 +113,59 @@ class AccessibilitySender:
                 raise SendError(f"手机上的共享附件未通过内容校验（预期 {len(data)} 字节，实际 {len(copied)} 字节）")
 
             self.progress("已校验附件内容，正在打开微信系统分享")
-            output = shell("am", "start", "-W", "--user", user, "-n", "com.tencent.mm/.ui.tools.ShareImgUI",
-                           "-a", "android.intent.action.SEND", "-t", mime,
-                           "--grant-read-uri-permission", "--eu", "android.intent.extra.STREAM", uri)
-            if "Error:" in output or "Exception" in output:
-                raise SendError("Android 无法打开微信分享页面")
-
-            prompted = False
-            for _ in range(90):
-                active = focus()
-                if active and active.group(1) == user and active.group(2) == "com.tencent.mm":
-                    if self.call("share_status")["ready"]:
-                        break
-                if active and "XSpaceResolveActivity" in active.group(3) and not prompted:
-                    self.progress("检测到双开微信，请在手机上选择原先处于前台的微信实例")
-                    prompted = True
-                time.sleep(1)
-            else:
-                raise SendError("等待微信分享页面超时，未发送附件")
-
-            self.progress("正在核对微信分享确认页上的收件人和附件")
-            result = self.call("share", target=target, kind=kind, filename=filename, dry_run=self.dry_run)
-            self.progress(result.get("error", "系统分享操作已完成"))
-            return result["ok"]
+            return self.share(user, target, mime, kind,
+                              ["--grant-read-uri-permission", "--eu", "android.intent.extra.STREAM", uri],
+                              filename=filename)
         finally:
             try:
                 shell(*content("delete", uri))
                 shell("rmdir", remote.rsplit("/", 1)[0])
             except Exception:
                 self.progress("手机端临时分享文件清理失败")
+
+    def foreground(self):
+        import re
+
+        windows = self.device.shell(["dumpsys", "window"], timeout=5)
+        return re.search(r"mCurrentFocus=Window\{[^\r\n]*\bu(\d+) ([\w.]+)/([^}\s]+)", windows)
+
+    def share_user(self):
+        active = self.foreground()
+        if active is None or active.group(2) != "com.tencent.mm":
+            raise SendError("请先将目标微信打开到前台")
+        return active.group(1)
+
+    def share_text(self, target, text):
+        text = normalize_text(text)
+        if not text.strip() or len(text) > self.max_chars:
+            raise SendError(f"文字不能为空，且最多 {self.max_chars} 字")
+        return self.share(self.share_user(), target, "text/plain", "text",
+                          ["--es", "android.intent.extra.TEXT", text], text=text)
+
+    def share(self, user, target, mime, kind, extras, **payload):
+        import time
+
+        output = self.device.shell(
+            ["am", "start", "-W", "--user", user, "-n", "com.tencent.mm/.ui.tools.ShareImgUI",
+             "-a", "android.intent.action.SEND", "-t", mime, *extras], timeout=10)
+        if "Error:" in output or "Exception" in output:
+            raise SendError("Android 无法打开微信分享页面")
+
+        prompted = False
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            active = self.foreground()
+            if active and active.group(1) == user and active.group(2) == "com.tencent.mm":
+                if self.call("share_status")["ready"]:
+                    break
+            if active and "XSpaceResolveActivity" in active.group(3) and not prompted:
+                self.progress("检测到双开微信，请在手机上选择原先处于前台的微信实例")
+                prompted = True
+            time.sleep(1)
+        else:
+            raise SendError("等待微信分享页面超时，未发送消息")
+
+        self.progress("正在核对微信分享确认页上的收件人和内容")
+        result = self.call("share", target=target, kind=kind, dry_run=self.dry_run, **payload)
+        self.progress(result.get("error", "系统分享操作已完成"))
+        return result["ok"]
