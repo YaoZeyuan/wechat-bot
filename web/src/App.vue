@@ -14,6 +14,30 @@ const error = ref('')
 const notice = ref('')
 const busy = ref(false)
 const steps = ref<string[]>([])
+const screen = ref('')
+const loadingScreen = ref(false)
+const screenError = ref('')
+let disposed = false
+
+function clearScreen() {
+  if (screen.value) URL.revokeObjectURL(screen.value)
+  screen.value = ''
+}
+
+async function captureScreen() {
+  loadingScreen.value = true
+  screenError.value = ''
+  try {
+    const blob = await api.senderScreen()
+    if (disposed) return
+    clearScreen()
+    screen.value = URL.createObjectURL(blob)
+  } catch (cause) {
+    screenError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    loadingScreen.value = false
+  }
+}
 const saving = ref(false)
 
 const target = ref('')
@@ -157,7 +181,11 @@ onMounted(async () => {
   statusTimer = window.setInterval(() => { if (!document.hidden && !busy.value) void refreshDevice() }, 5000)
   await Promise.all([refresh(), loadConfig(), refreshProgress()])
 })
-onUnmounted(() => window.clearInterval(statusTimer))
+onUnmounted(() => {
+  disposed = true
+  window.clearInterval(statusTimer)
+  clearScreen()
+})
 </script>
 
 <template>
@@ -260,6 +288,20 @@ onUnmounted(() => window.clearInterval(statusTimer))
         </tbody>
       </table>
       <p v-else class="hint">还没有发送记录。接上手机后先在左侧点「演练发送」。</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>手机画面</h2>
+        <div class="row">
+          <button class="ghost" :disabled="loadingScreen || deviceReady !== true" @click="captureScreen">
+            {{ loadingScreen ? '读取中…' : '获取当前截图' }}
+          </button>
+          <button v-if="screen" class="ghost" @click="clearScreen">关闭截图</button>
+        </div>
+      </div>
+      <p v-if="screenError" class="message error">{{ screenError }}</p>
+      <img v-if="screen" :src="screen" alt="手机当前截图" style="max-width: 100%; max-height: 70vh" />
     </section>
 
     <footer class="foot">

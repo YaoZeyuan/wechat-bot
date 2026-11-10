@@ -108,6 +108,14 @@ interface SenderJobResult {
 }
 
 export const api = {
+  async senderScreen() {
+    const response = await fetch(`${BASE}/sender/screen`, { cache: 'no-store' })
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new Error(body.detail || '获取手机截图失败')
+    }
+    return response.blob()
+  },
   uploadSenderAsset: (id: string, file: File) =>
     request(`/sender/assets/${id}?filename=${encodeURIComponent(file.name)}`, { method: 'PUT', body: file }),
   submitSenderJob: (payload: unknown) =>

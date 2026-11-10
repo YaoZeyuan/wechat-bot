@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/sender")
@@ -57,6 +57,25 @@ def save(key, result):
     with closing(database()) as conn, conn:
         conn.execute("UPDATE jobs SET result = ? WHERE id = ?", (json.dumps(result), key))
 
+
+@router.get("/screen")
+def screen():
+    from adbutils import adb
+    from adbutils.errors import AdbError
+    from server.main import _devices
+
+    ready = [item for item in _devices() if item["state"] == "device"]
+    if len(ready) != 1:
+        raise HTTPException(409, "请连接并授权一台手机")
+    try:
+        image = adb.device(ready[0]["serial"]).shell(
+            ["screencap", "-p"], encoding=None, timeout=8
+        )
+    except (OSError, AdbError) as exc:
+        raise HTTPException(502, "手机截图失败") from exc
+    if not image.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise HTTPException(502, "手机未返回有效的 PNG 截图")
+    return Response(image, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 @router.put("/assets/{asset_id}")
 async def upload(asset_id: UUID, filename: str, request: Request):

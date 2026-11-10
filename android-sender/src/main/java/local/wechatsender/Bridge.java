@@ -62,7 +62,9 @@ public final class Bridge extends AccessibilityService {
         String target = request.getString("target");
         if (action.equals("prepare")) {
             if (!inChat(target)) locate(target);
-            require(inChat(target), "会话标题未匹配");
+            require(inChat(target), "会话校验失败，标题匹配数 " + titles(target).size()
+                + "，可编辑控件数 " + matching(AccessibilityNodeInfo::isEditable).size()
+                + "，页面控件：" + pageShape(target));
             return new JSONObject();
         }
         require(action.equals("text"), "未知操作");
@@ -96,23 +98,34 @@ public final class Bridge extends AccessibilityService {
             pause();
         }
         require(home(), "无法确认聊天首页");
+        List<AccessibilityNodeInfo> direct = conversationRows(target);
+        require(direct.size() <= 1, "首页有多个同名会话");
+        if (direct.size() == 1) {
+            click(direct.get(0));
+            pause();
+            return;
+        }
+        List<AccessibilityNodeInfo> folded = matching(named("折叠的聊天"));
+        if (folded.size() == 1) {
+            click(folded.get(0));
+            pause();
+            List<AccessibilityNodeInfo> groups = conversationRows(target);
+            require(groups.size() <= 1, "折叠列表有多个同名会话");
+            if (groups.size() == 1) {
+                click(groups.get(0));
+                pause();
+                return;
+            }
+            require(performGlobalAction(GLOBAL_ACTION_BACK), "无法退出折叠列表");
+            pause();
+            require(home(), "无法返回聊天首页");
+        }
         click(unique(named("搜索"), "首页搜索入口"));
         pause();
         setText(unique(n -> n.isEditable(), "搜索输入框"), target);
         pause();
-        List<AccessibilityNodeInfo> results = matching(n -> !n.isEditable() && named(target).test(n));
-        if (results.isEmpty()) {
-            for (int attempt = 0; attempt < 3 && !home(); attempt++) {
-                require(!nodes().isEmpty(), "微信控件已不可读");
-                require(performGlobalAction(GLOBAL_ACTION_BACK), "无法返回聊天首页");
-                pause();
-            }
-            require(home(), "无法返回聊天首页");
-            click(unique(named("折叠的聊天"), "折叠的聊天入口"));
-            pause();
-            results = matching(named(target));
-        }
-        require(results.size() == 1, "目标会话没有唯一匹配");
+        List<AccessibilityNodeInfo> results = conversationRows(target);
+        require(results.size() == 1, "目标会话匹配数为 " + results.size());
         click(results.get(0));
         pause();
     }
@@ -121,13 +134,56 @@ public final class Bridge extends AccessibilityService {
         return !matching(named("通讯录")).isEmpty() && !matching(named("搜索")).isEmpty();
     }
 
-    private boolean inChat(String name) {
-        android.util.DisplayMetrics display = getResources().getDisplayMetrics();
-        return !matching(n -> {
+    private List<AccessibilityNodeInfo> conversationRows(String target) {
+        Set<AccessibilityNodeInfo> rows = new LinkedHashSet<>();
+        for (AccessibilityNodeInfo node : matching(n -> !n.isEditable() && named(target).test(n))) {
+            AccessibilityNodeInfo row = clickable(node);
+            if (row != null && !row.isEditable() && !isWebSearch(row)) rows.add(row);
+        }
+        return new ArrayList<>(rows);
+    }
+
+    private boolean isWebSearch(AccessibilityNodeInfo row) {
+        List<AccessibilityNodeInfo> descendants = new ArrayList<>();
+        collect(row, descendants);
+        for (AccessibilityNodeInfo node : descendants) {
+            String label = value(node.getText()) + " " + value(node.getContentDescription());
+            if (label.contains("搜一搜") || label.contains("网页搜索") || label.contains("搜索网络")) return true;
+        }
+        return false;
+    }
+
+    private List<AccessibilityNodeInfo> titles(String name) {
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        java.util.regex.Pattern groupTitle = java.util.regex.Pattern.compile(
+            java.util.regex.Pattern.quote(name) + "\\s*[（(]\\d+[）)]");
+        return matching(n -> {
             Rect bounds = new Rect();
             n.getBoundsInScreen(bounds);
-            return !n.isEditable() && named(name).test(n) && bounds.top < display.heightPixels * .15;
-        }).isEmpty() && matching(n -> n.isEditable()).size() == 1;
+            return !n.isEditable() && bounds.top < screenHeight * .15
+                && (named(name).test(n) || groupTitle.matcher(value(n.getText())).matches()
+                    || groupTitle.matcher(value(n.getContentDescription())).matches());
+        });
+    }
+
+    private boolean inChat(String name) {
+        return !titles(name).isEmpty() && matching(AccessibilityNodeInfo::isEditable).size() == 1;
+    }
+
+    private String pageShape(String target) {
+        Set<String> markers = new LinkedHashSet<>();
+        for (AccessibilityNodeInfo node : nodes()) {
+            boolean nameMatch = value(node.getText()).toString().contains(target)
+                || value(node.getContentDescription()).toString().contains(target);
+            String type = value(node.getClassName()).toString();
+            if (nameMatch || node.isEditable() || type.endsWith("EditText")) {
+                Rect bounds = new Rect();
+                node.getBoundsInScreen(bounds);
+                markers.add((nameMatch ? "目标" : "输入") + "/" + type + "/"
+                    + node.getViewIdResourceName() + "/y=" + bounds.top);
+            }
+        }
+        return String.join(", ", markers);
     }
 
     private List<AccessibilityNodeInfo> nodes() {
@@ -165,8 +221,13 @@ public final class Bridge extends AccessibilityService {
 
     private static CharSequence value(CharSequence value) { return value == null ? "" : value; }
 
-    private static void click(AccessibilityNodeInfo node) throws IOException {
+    private static AccessibilityNodeInfo clickable(AccessibilityNodeInfo node) {
         while (node != null && !node.isClickable()) node = node.getParent();
+        return node;
+    }
+
+    private static void click(AccessibilityNodeInfo node) throws IOException {
+        node = clickable(node);
         require(node != null && node.performAction(AccessibilityNodeInfo.ACTION_CLICK), "控件无法点击");
     }
 
