@@ -105,13 +105,11 @@ interface SenderJobResult {
   status: string
   steps: string[]
   items: string[]
-  screens?: number[]
 }
 
 export const api = {
-  async senderScreen(id?: string, step?: number) {
-    const path = id && step !== undefined ? `/sender/jobs/${id}/steps/${step}/screen` : '/sender/screen'
-    const response = await fetch(BASE + path, { cache: 'no-store' })
+  async senderScreen() {
+    const response = await fetch(`${BASE}/sender/screen`, { cache: 'no-store' })
     if (!response.ok) {
       const body = await response.json().catch(() => ({}))
       throw new Error(body.detail || '获取手机截图失败')

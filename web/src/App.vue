@@ -6,6 +6,7 @@ import type { HealthResponse, LogItem, Stats } from './types'
 const health = ref<HealthResponse | null>(null)
 const deviceReady = ref<boolean | null>(null)
 let statusTimer: number | undefined
+let liveTimer: number | undefined
 let checkingDevice = false
 const stats = ref<Stats | null>(null)
 const logs = ref<LogItem[]>([])
@@ -15,10 +16,7 @@ const notice = ref('')
 const busy = ref(false)
 const steps = ref<string[]>([])
 const screen = ref('')
-const captureSteps = ref(false)
-const stepScreens = ref<number[]>([])
-const screenJobId = ref('')
-const shownStep = ref<number | undefined>()
+const currentStep = ref('')
 const loadingScreen = ref(false)
 const screenError = ref('')
 let disposed = false
@@ -26,18 +24,17 @@ let disposed = false
 function clearScreen() {
   if (screen.value) URL.revokeObjectURL(screen.value)
   screen.value = ''
-  shownStep.value = undefined
 }
 
-async function captureScreen(step?: number) {
+async function captureScreen() {
+  if (loadingScreen.value) return
   loadingScreen.value = true
   screenError.value = ''
   try {
-    const blob = await api.senderScreen(screenJobId.value, step)
+    const blob = await api.senderScreen()
     if (disposed) return
     clearScreen()
     screen.value = URL.createObjectURL(blob)
-    shownStep.value = step
   } catch (cause) {
     screenError.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -122,9 +119,10 @@ async function doSend(): Promise<void> {
   notice.value = ''
   busy.value = true
   steps.value = []
-  stepScreens.value = []
-  screenJobId.value = ''
   clearScreen()
+  currentStep.value = '正在准备任务'
+  liveTimer = window.setInterval(() => { if (!document.hidden) void captureScreen() }, 1000)
+  void captureScreen()
   try {
     const messages: ({ type: 'text'; text: string } | { type: 'image' | 'file'; asset_id: string })[] = []
     if (text.value.trim()) messages.push({ type: 'text', text: text.value })
@@ -135,11 +133,9 @@ async function doSend(): Promise<void> {
       messages.push({ type: /\.(png|jpe?g)$/i.test(file.name) ? 'image' : 'file', asset_id: assetId })
     }
     const requestId = crypto.randomUUID()
-    screenJobId.value = requestId
     const helper = kind.value === 'file_helper'
     let result = await api.submitSenderJob({
       version: 1,
-      capture_steps: captureSteps.value,
       request_id: requestId,
       mode: dryRun.value ? 'dry_run' : 'send',
       target: { kind: kind.value, id: helper ? 'filehelper' : targetId.value.trim(), name: helper ? '文件传输助手' : target.value.trim() },
@@ -147,11 +143,11 @@ async function doSend(): Promise<void> {
     })
     while (result.status === 'queued' || result.status === 'running') {
       steps.value = result.steps
-      stepScreens.value = result.screens ?? []
+      currentStep.value = result.steps[result.steps.length - 1] ?? '等待执行'
       await new Promise(resolve => window.setTimeout(resolve, 500))
       result = await api.senderJob(requestId)
     }
-    stepScreens.value = result.screens ?? []
+    currentStep.value = result.steps[result.steps.length - 1] ?? '任务结束'
     const labels: Record<string, string> = { pending: '未执行', checked: '演练通过', sent: '已发送', uncertain: '待核对', failed: '失败' }
     steps.value = [...result.steps, ...result.items.map((item, index) => `第 ${index + 1} 条消息 · ${labels[item] ?? item}`)]
     if (result.status === 'completed') notice.value = dryRun.value ? '演练完成' : '发送完成'
@@ -160,6 +156,7 @@ async function doSend(): Promise<void> {
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
+    window.clearInterval(liveTimer)
     busy.value = false
   }
 }
@@ -197,6 +194,7 @@ onMounted(async () => {
 onUnmounted(() => {
   disposed = true
   window.clearInterval(statusTimer)
+  window.clearInterval(liveTimer)
   clearScreen()
 })
 </script>
@@ -243,10 +241,6 @@ onUnmounted(() => {
           <input type="checkbox" v-model="dryRun" />
           仅演练（填入输入框但不点击发送）
         </label>
-        <label class="check">
-          <input type="checkbox" v-model="captureSteps" :disabled="busy" />
-          保存各步骤截图
-        </label>
         <div class="row">
           <button class="primary" :disabled="busy || deviceReady !== true || (kind !== 'file_helper' && (!target.trim() || !targetId.trim())) || (!text.trim() && !attachments.length)" @click="doSend">
             {{ busy ? '处理中…' : dryRun ? '演练发送' : '实际发送' }}
@@ -256,17 +250,25 @@ onUnmounted(() => {
         <p v-if="deviceReady === false" class="hint">请连接并授权一台手机，再刷新状态。</p>
         <h3 v-if="steps.length">发送过程</h3>
         <ol v-if="steps.length" aria-live="polite">
-          <li v-for="(step, index) in steps" :key="index">
-            {{ step }}
-            <button v-if="stepScreens.includes(index)" class="ghost" :disabled="loadingScreen"
-              @click="shownStep === index ? clearScreen() : captureScreen(index)">
-              {{ shownStep === index ? '收起截图' : '查看截图' }}
-            </button>
-            <img v-if="screen && shownStep === index" :src="screen" :alt="'第 ' + (index + 1) + ' 步截图'"
-              style="display: block; max-width: 100%; max-height: 70vh" />
-          </li>
+          <li v-for="(step, index) in steps" :key="index">{{ step }}</li>
         </ol>
       </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>实时进度</h2>
+          <div class="row">
+            <button class="ghost" :disabled="loadingScreen || deviceReady !== true" @click="captureScreen()">
+              {{ loadingScreen ? '读取中…' : '获取当前截图' }}
+            </button>
+            <button v-if="screen && !busy" class="ghost" @click="clearScreen">关闭截图</button>
+          </div>
+        </div>
+        <p aria-live="polite">{{ currentStep || '等待任务' }}</p>
+        <p v-if="screenError" class="message error">{{ screenError }}</p>
+        <img v-if="screen" :src="screen" alt="手机当前截图" style="max-width: 100%; max-height: 70vh" />
+      </section>
+    </div>
 
       <section class="card">
         <h2>配置</h2>
@@ -287,7 +289,6 @@ onUnmounted(() => {
         </div>
         <p class="hint">保存后写入项目根目录的 config.json；UI 选择器候选也在这个文件里。</p>
       </section>
-    </div>
 
     <section class="card">
       <div class="card-head">
@@ -313,20 +314,6 @@ onUnmounted(() => {
         </tbody>
       </table>
       <p v-else class="hint">还没有发送记录。接上手机后先在左侧点「演练发送」。</p>
-    </section>
-
-    <section class="card">
-      <div class="card-head">
-        <h2>手机画面</h2>
-        <div class="row">
-          <button class="ghost" :disabled="loadingScreen || deviceReady !== true" @click="captureScreen()">
-            {{ loadingScreen ? '读取中…' : '获取当前截图' }}
-          </button>
-          <button v-if="screen && shownStep === undefined" class="ghost" @click="clearScreen">关闭截图</button>
-        </div>
-      </div>
-      <p v-if="screenError" class="message error">{{ screenError }}</p>
-      <img v-if="screen && shownStep === undefined" :src="screen" alt="手机当前截图" style="max-width: 100%; max-height: 70vh" />
     </section>
 
     <footer class="foot">

@@ -32,7 +32,6 @@ class AssetMessage(BaseModel):
 
 class Job(BaseModel):
     version: Literal[1]
-    capture_steps: bool = False
     request_id: UUID
     mode: Literal["send", "dry_run"]
     target: Target
@@ -124,16 +123,6 @@ def get_job(request_id: UUID):
     return json.loads(row[0])
 
 
-@router.get("/jobs/{request_id}/steps/{step}/screen")
-def step_screen(request_id: UUID, step: int):
-    job = get_job(request_id)
-    if step not in job.get("screens", []):
-        raise HTTPException(404, "这一步没有截图")
-    image = root / "screens" / str(request_id) / f"{step}.png"
-    if not image.is_file():
-        raise HTTPException(404, "这一步的截图已不存在")
-    return Response(image.read_bytes(), media_type="image/png", headers={"Cache-Control": "no-store"})
-
 def run(job, result):
     from server.main import _devices, create_sender, sender_console_lock, sender_log
 
@@ -141,16 +130,6 @@ def run(job, result):
 
     def progress(message):
         result["steps"].append(message)
-        step = len(result["steps"]) - 1
-        if job.capture_steps:
-            try:
-                image = screen().body
-                folder = root / "screens" / key
-                folder.mkdir(parents=True, exist_ok=True)
-                (folder / f"{step}.png").write_bytes(image)
-                result.setdefault("screens", []).append(step)
-            except (OSError, HTTPException):
-                sender_log.warning("sender_step_screen_failed", msg="步骤截图获取失败", step=step)
         save(key, result)
         sender_log.info("sender_job_step", request_id=key, msg=message)
 
