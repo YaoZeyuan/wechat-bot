@@ -45,7 +45,7 @@ const saving = ref(false)
 
 const target = ref('')
 const text = ref('')
-const dryRun = ref(true)
+const dryRun = ref(false)
 const kind = ref<'contact' | 'group' | 'file_helper'>('file_helper')
 const targetId = ref('')
 const conversationQuery = ref('')
