@@ -20,6 +20,9 @@ public final class Bridge extends AccessibilityService {
     private String preparedTarget;
 
     @Override protected void onServiceConnected() {
+        android.accessibilityservice.AccessibilityServiceInfo info = getServiceInfo();
+        info.flags |= android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+        setServiceInfo(info);
         synchronized (Bridge.class) {
             activeBridge = this;
             if (currentListener != null) {
@@ -75,7 +78,8 @@ public final class Bridge extends AccessibilityService {
             JSONObject status = new JSONObject().put("nodes", nodes().size())
                 .put("root_package", root == null ? JSONObject.NULL : value(root.getPackageName()).toString())
                 .put("root_children", root == null ? 0 : root.getChildCount())
-                .put("root_bounds", bounds.toShortString());
+                .put("root_bounds", bounds.toShortString())
+                .put("interactive_windows", getWindows().size());
             android.util.Log.i("WeChatSender", "控件诊断 " + status);
             return status;
         }
@@ -157,7 +161,14 @@ public final class Bridge extends AccessibilityService {
         pause();
         AccessibilityNodeInfo send;
         try {
-            send = unique(named("发送"), "分享确认发送按钮");
+            List<AccessibilityNodeInfo> buttons = matching(named("发送"));
+            for (int attempt = 0; attempt < 5 && buttons.isEmpty(); attempt++) {
+                pause();
+                buttons = matching(named("发送"));
+            }
+            require(buttons.size() == 1, "分享确认发送按钮匹配数为 " + buttons.size()
+                + "，微信可见节点 " + nodes().size());
+            send = buttons.get(0);
             Rect button = new Rect();
             send.getBoundsInScreen(button);
             java.util.regex.Pattern groupLabel = java.util.regex.Pattern.compile(
@@ -186,6 +197,12 @@ public final class Bridge extends AccessibilityService {
         click(send);
         for (int attempt = 0; attempt < 8; attempt++) {
             pause();
+            List<AccessibilityNodeInfo> stay = matching(named("留在微信"));
+            if (stay.size() == 1 && !matching(named("已发送")).isEmpty()) {
+                try { click(stay.get(0)); }
+                catch (IOException error) { android.util.Log.w("WeChatSender", "发送已确认，未能关闭成功提示", error); }
+                return new JSONObject();
+            }
             if (matching(named("最近聊天")).isEmpty()
                 && !matching(AccessibilityNodeInfo::isEditable).isEmpty()
                 && !matching(image ? named("图片") : contentMatch).isEmpty()) {
@@ -337,6 +354,16 @@ public final class Bridge extends AccessibilityService {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         List<AccessibilityNodeInfo> result = new ArrayList<>();
         if (root != null && WECHAT.contentEquals(value(root.getPackageName()))) collect(root, result);
+        if (result.isEmpty()) {
+            for (android.view.accessibility.AccessibilityWindowInfo window : getWindows()) {
+                if (!window.isFocused() || window.getType() != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo candidate = window.getRoot();
+                if (candidate != null && WECHAT.contentEquals(value(candidate.getPackageName()))) {
+                    collect(candidate, result);
+                    break;
+                }
+            }
+        }
         return result;
     }
 
