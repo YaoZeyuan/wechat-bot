@@ -1,44 +1,26 @@
 # wechat-bot
 
-本项目面向个人用户的本机使用场景。后台最多同时监听 10 个微信群。
+面向个人用户的本地微信机器人。Windows 端使用 SQLCipher 只读访问已配置的微信数据库，Android 端通过 USB 执行发送，Web 控制台管理初始化、群监听、插件和发送任务。
 
-电脑通过 `uiautomator2` 驱动安卓手机上的微信，把文本发到指定会话，并提供一个本地 Web 控制台。
-
-> **当前状态：第一期只实现「发送消息」链路。** 群内指令识别、「活跃日榜」统计、定时发榜都还没有实现，见文末「路线」。
-
-## 能做什么 / 不能做什么
-
-- **能**：向指定会话发送中文、多行、emoji 文本；演练模式（只填文本、不点发送）；发送结果写入 SQLite；FastAPI 接口 + Vue 控制台用于配置、预览和查看日志。
-- **不能**：不读取聊天记录、不做统计、不监听群消息、不绕过微信客户端、不提供账号或协议服务。
-- **不需要**：第一期**不需要 PC 版微信**，只要一台已登录微信的安卓手机和 USB 调试权限。
+- 在 Web 分页查看联系人、群聊和聊天记录。
+- 按群 ID 监听，最多同时启用 10 个群。首次开启从当前进度开始。
+- 每群配置「测试」和「活跃日榜」。测试关键词按整条文本精确匹配。日榜按北京时间统计当天发言数。
+- 手机端通过微信分享界面发送文字、PNG、JPEG、TXT 和 PDF。混合任务先发附件，再发文字。Web 显示逐步日志和手机画面。
 
 ## 架构
 
 ```mermaid
 flowchart LR
-  A[Vue 控制台] -->|REST /api| B[FastAPI server]
-  B --> C[sender/ 发送模块]
-  C -->|uiautomator2 / adb| D[安卓手机上的微信]
-  B --> E[(SQLite bot.db)]
-  C --> F[debug 截图与界面层级]
+  A[Vue 控制台] -->|REST API| B[FastAPI]
+  C[(Windows 微信数据库)] -->|SQLCipher 只读| B
+  B --> D[群监听与插件]
+  D --> E[Sender 任务]
+  B --> E
+  E -->|ADB 转发| F[Android 无障碍 Sender]
+  F --> G[微信分享界面]
 ```
 
-所有业务逻辑都在电脑上，手机只是被控终端，不需要在手机上安装额外应用。`uiautomator2` 3.x 会在运行时通过 adb 拉起设备端服务，因此**不需要**执行旧版的 `python -m uiautomator2 init`。
-
-### 扩展发送通道
-
-`sender/` 是一个可插拔的包：
-
-| 文件 | 职责 |
-| --- | --- |
-| `base.py` | `Sender` 协议与 `SendError` |
-| `config.py` | 配置加载、adb 环境注入、模板自动生成 |
-| `text.py` | 文本规范化与校验探针（纯函数，不依赖设备） |
-| `store.py` | SQLite 发送日志 |
-| `u2.py` | 当前唯一实现 `U2Sender`，通过 uiautomator2 驱动手机 |
-| `__init__.py` | 统一导出与 `create_sender()` 工厂 |
-
-新增通道（例如 PC Hook、常驻无障碍 App）时：写一个实现 `send(target, text) -> bool` 的类，在 `create_sender()` 里注册一个分支，再把 `config.json` 的 `sender_channel` 改成对应名字即可。`server` 和 CLI 都通过工厂拿发送器，不需要改动。
+`sender_channel: "accessibility"` 用于 Web 任务和插件发送。项目也提供 `u2` 通道，可通过 uiautomator2 执行文字调试。群配置存放于 `local-data/group-plugins.json`，发送任务和步骤保存在本地 SQLite。
 
 ## 环境要求
 
@@ -69,20 +51,7 @@ cd ..
 uv run python check_env.py
 ```
 
-它会打印 Python / adb / 设备 / 微信安装状态，以及手机端准备清单。手机准备好后：
-
-1. 编辑 `config.json`：填 `adb_dir`（platform-tools 目录）、`serial`（多设备时指定）、`default_target`（目标会话名）。
-2. 先演练，确认文本正确填入了目标会话的输入框：
-
-   ```bash
-   uv run dev-sender --text "发送链路测试" --dry-run
-   ```
-
-3. 确认无误后再实际发送：
-
-   ```bash
-   uv run dev-sender --text "发送链路测试" --to "某群名"
-   ```
+环境检查会列出 Python、ADB、手机和微信的状态。按下文「手机无障碍 Sender」安装并启用手机服务，将本机 `config.json` 的 `sender_channel` 设为 `accessibility`。
 
 启动 Web 控制台（两个终端）：
 
@@ -103,7 +72,7 @@ uv run dev-web
 | 字段 | 说明 |
 | --- | --- |
 | `adb_dir` | platform-tools 目录；留空则依赖系统 PATH 中的 adb |
-| `sender_channel` | 发送通道名，默认 `u2`；新增实现后在这里切换 |
+| `sender_channel` | 模板默认 `u2`，Web 系统分享和插件实发使用 `accessibility` |
 | `serial` | 设备序列号，留空自动选择；WiFi 连接填 `IP:端口` |
 | `default_target` | 默认会话名，模板为「文件传输助手」 |
 | `dry_run` | `true` 时只填文本不点发送，模板默认 `true` |
@@ -142,14 +111,16 @@ uv run dev-sender --dump                        # 导出当前界面层级，用
 | POST | `/api/send` | 执行发送（支持 `dry_run`） |
 | GET | `/api/logs` | 最近发送日志 |
 | GET | `/api/stats` | 今日发送次数统计 |
+| POST | `/api/sender/jobs` | 提交 Web 和插件共用的版本化发送任务 |
+| GET | `/api/sender/jobs/{request_id}` | 查询任务结果和中文步骤日志 |
 
 接口文档在 server 启动后的 `/docs`。
 
 ### 微信版本与选择器
 
-微信更新后 `resource-id` 常变，控件定位全部放在 `config.json` 的 `selectors` 里，代码不硬编码。找不到控件时：
+以下步骤用于 `u2` 通道，其控件候选配置在 `config.json` 的 `selectors`。
 
-1. 手机停在出问题的界面，运行 `send.py --dump`；
+1. 手机停在出问题的界面，运行 `uv run dev-sender --dump`；
 2. 打开 `debug/hierarchy.xml`，找到目标节点的 `text`、`resource-id` 或 `class`；
 3. 把新的候选追加到对应选择器数组的最前面。
 
@@ -175,10 +146,9 @@ uv run dev-sender --dump                        # 导出当前界面层级，用
 - 建议低频、单群、使用非主力账号；本项目不提供绕过限制、批量群发或多账号管理能力。
 - 本项目仅供个人学习与自用，与微信官方无任何关联；使用者需自行承担账号与数据风险。
 
-## 路线
+## 后续计划
 
-- **已完成**：消息发送链路、演练模式、发送校验、SQLite 日志、FastAPI 接口、Vue 控制台、配置与选择器外置。
-- **待实现**：聊天记录采集与落库、群内指令识别（如「活跃日榜」）、当日发言数 Top10 统计、触发/定时发榜、群白名单与防刷、榜单文本模板。
+继续验收真实群插件回复和附件加文字的混合发送。网页分享、引用原消息和 @ 群成员的实现计划见 [项目计划](plan/项目计划.md)。
 
 ## 许可证
 
@@ -196,7 +166,7 @@ uv run dev-sender --help
 
 前两个命令分别启动 API（8000）和 Web（3000）。发送器是按次执行的 CLI，例如 `uv run dev-sender --devices`。读取本地数据库无需开启 Mock。
 
-「Sender」标签（`/sender`）显示是否有且仅有一台已授权的手机。让手机微信停在首页，填写完整的联系人或群聊名称和文本。默认勾选「仅演练」，取消后点击「实际发送」，由后端调度 sender。
+「Sender」标签（`/sender`）显示是否有且仅有一台已授权的手机。让手机微信停在首页，填写完整的联系人或群聊名称和文本。默认显示「实际发送」，需要验证定位时手动勾选「仅演练」，由后端调度 sender。
 
 `uv run dev-server` 默认监控 `server/` 和 `sender/` 中的 Python 文件并自动重启 API。需要关闭热重载时使用 `uv run dev-server --no-reload`。
 
@@ -239,10 +209,10 @@ uv run python -m server.export_history --snapshot local-data/snapshot --account 
 步骤日志会显示手机服务读到的微信可见节点数。
 
 手机服务经 ADB 转发接收命令，使用 Android 无障碍控件定位和校验。
-现阶段支持文字演练和发送。原版和双开版的可读性需要在目标手机上分别验证。
+支持文字、图片和文件的演练与发送。双开选择框出现时，按 Web 日志提示在手机上选择微信实例。群聊发送前会核对群 ID 和唯一显示名。
 
 参考项目 [wechat-rpa-demo](https://github.com/AbbottKilig/wechat-rpa-demo)。
 
 ### 部分手机上的微信无障碍兼容性
 
-在单微信测试机上，系统设置可读但微信只返回空根节点。临时同时启用系统 TalkBack 后，Sender 能读取微信分享页并发送消息。若同一台手机复现此现象，可在系统无障碍设置中启用 TalkBack，再打开微信。TalkBack 会改变触摸手势，停用后微信节点可能再次缺失。
+在单微信测试机上，系统设置可读但微信只返回空根节点。同时启用系统 TalkBack 后，Sender 读到微信首页的 189 个可见节点，并向文件传输助手实发了一条文字测试。该测试机于 2026-11-11 开启并保留 TalkBack。若同一台手机复现此现象，可在系统无障碍设置中启用 TalkBack，再打开微信。TalkBack 会改变触摸手势，停用后微信节点可能再次缺失。
