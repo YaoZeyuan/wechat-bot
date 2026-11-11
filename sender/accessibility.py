@@ -33,6 +33,9 @@ class AccessibilitySender:
         self.device = adb.device(self.serial)
         result = self.call("status")
         self.progress(f"已连接手机无障碍服务，前台微信可见节点 {result['nodes']} 个")
+        if not result["nodes"] and "root_package" in result:
+            package = result["root_package"] or "无根节点"
+            self.progress(f"无障碍诊断：根节点 {package}，直接子节点 {result['root_children']} 个，边界 {result['root_bounds']}")
 
     def call(self, action, **payload):
         endpoint = "localabstract:wechat_sender"

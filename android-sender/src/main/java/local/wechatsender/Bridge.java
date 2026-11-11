@@ -15,20 +15,29 @@ import org.json.JSONObject;
 
 public final class Bridge extends AccessibilityService {
     private static final String WECHAT = "com.tencent.mm";
-    private LocalServerSocket listener;
+    private static LocalServerSocket currentListener;
+    private static volatile Bridge activeBridge;
     private String preparedTarget;
 
     @Override protected void onServiceConnected() {
-        try {
-            listener = new LocalServerSocket("wechat_sender");
-            LocalServerSocket socket = listener;
-            new Thread(() -> serve(socket), "sender-usb").start();
-        } catch (IOException error) {
-            android.util.Log.e("WeChatSender", "无法启动 USB 服务", error);
+        synchronized (Bridge.class) {
+            activeBridge = this;
+            if (currentListener != null) {
+                android.util.Log.i("WeChatSender", "无障碍服务已重连，继续使用现有 USB 监听");
+                return;
+            }
+            try {
+                LocalServerSocket socket = new LocalServerSocket("wechat_sender");
+                currentListener = socket;
+                new Thread(() -> serve(socket), "sender-usb").start();
+                android.util.Log.i("WeChatSender", "USB 监听已启动");
+            } catch (IOException error) {
+                android.util.Log.e("WeChatSender", "无法启动 USB 服务", error);
+            }
         }
     }
 
-    private void serve(LocalServerSocket socket) {
+    private static void serve(LocalServerSocket socket) {
         while (true) {
             LocalSocket client;
             try { client = socket.accept(); }
@@ -43,7 +52,9 @@ public final class Bridge extends AccessibilityService {
                     String line = reader.readLine();
                     if (line == null) continue;
                     JSONObject request = new JSONObject(line);
-                    JSONObject response = execute(request, clicked);
+                    Bridge bridge = activeBridge;
+                    if (bridge == null) throw new IOException("手机无障碍服务尚未连接");
+                    JSONObject response = bridge.execute(request, clicked);
                     writer.println(response.put("ok", true));
                 } catch (Exception error) {
                     writer.println(new JSONObject().put("ok", false).put("uncertain", clicked[0])
@@ -58,7 +69,15 @@ public final class Bridge extends AccessibilityService {
     private JSONObject execute(JSONObject request, boolean[] clicked) throws Exception {
         String action = request.getString("action");
         if (action.equals("status")) {
-            return new JSONObject().put("nodes", nodes().size());
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            Rect bounds = new Rect();
+            if (root != null) root.getBoundsInScreen(bounds);
+            JSONObject status = new JSONObject().put("nodes", nodes().size())
+                .put("root_package", root == null ? JSONObject.NULL : value(root.getPackageName()).toString())
+                .put("root_children", root == null ? 0 : root.getChildCount())
+                .put("root_bounds", bounds.toShortString());
+            android.util.Log.i("WeChatSender", "控件诊断 " + status);
+            return status;
         }
         if (action.equals("share_status")) {
             return new JSONObject().put("ready", !matching(named("最近聊天")).isEmpty());
@@ -381,7 +400,9 @@ public final class Bridge extends AccessibilityService {
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {}
     @Override public void onInterrupt() {}
     @Override public void onDestroy() {
-        if (listener != null) try { listener.close(); } catch (IOException ignored) {}
+        synchronized (Bridge.class) {
+            if (activeBridge == this) activeBridge = null;
+        }
         super.onDestroy();
     }
 }
