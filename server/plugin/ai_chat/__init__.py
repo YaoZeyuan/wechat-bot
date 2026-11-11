@@ -76,6 +76,11 @@ def trigger(text: str) -> tuple[str, str] | None:
     return None
 
 
+def format_question(text: str, display_name: str, quotes: list[dict[str, str]]) -> str:
+    sender = display_name or "提问者"
+    return with_quotes(f"{sender}: {text}", quotes)
+
+
 def with_quotes(prompt: str, quotes: list[dict[str, str]]) -> str:
     if not quotes:
         return prompt

@@ -179,10 +179,6 @@ public final class Bridge extends AccessibilityService {
                 || (group && (groupLabel.matcher(value(n.getText())).matches()
                     || groupLabel.matcher(value(n.getContentDescription())).matches())))).size() == 1,
                 "分享确认页未核对到唯一收件人");
-            if (kind.equals("text")) {
-                require(!matching(n -> !n.isEditable() && contentMatch.test(n) && lowerSheet(n, button)).isEmpty(),
-                    "分享确认页内容未匹配");
-            }
             if (request.getBoolean("dry_run")) {
                 click(unique(named("取消"), "取消分享按钮"));
                 return new JSONObject();

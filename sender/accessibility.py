@@ -33,13 +33,15 @@ class AccessibilitySender:
         from adbutils import adb
 
         self.device = adb.device(self.serial)
+        self.ensure_awake_and_talkback()
         result = self.call("status")
         self.progress(f"已连接手机无障碍服务，前台微信可见节点 {result['nodes']} 个")
         if not result["nodes"] and "root_package" in result:
             package = result["root_package"] or "无根节点"
             self.progress(f"无障碍诊断：根节点 {package}，直接子节点 {result['root_children']} 个，边界 {result['root_bounds']}")
 
-    def prepare_device(self):
+    def ensure_awake_and_talkback(self):
+        self.progress("检查手机屏幕和 TalkBack")
         power = self.device.shell(["dumpsys", "power"], timeout=5)
         if not re.search(r"\bmWakefulness=Awake\b", power):
             self.progress("手机已息屏，正在通过 ADB 唤醒")
@@ -64,6 +66,8 @@ class AccessibilitySender:
         else:
             raise SendError("TalkBack 未能启动，请检查手机无障碍设置")
 
+    def prepare_device(self):
+        self.ensure_awake_and_talkback()
         active = self.foreground()
         if not active or active.group(2) != "com.tencent.mm":
             self.progress("正在打开手机微信")
@@ -211,7 +215,7 @@ class AccessibilitySender:
         else:
             raise ShareRejected("等待微信分享页面超时，未发送消息")
 
-        self.progress("正在核对微信分享确认页上的收件人和内容")
+        self.progress("正在核对微信分享确认页上的唯一收件人")
         try:
             result = self.call("share", target=target, kind=kind, dry_run=self.dry_run, **payload)
             self.progress(result.get("error", "系统分享操作已完成"))

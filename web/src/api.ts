@@ -151,6 +151,8 @@ export const api = {
     request<SenderJobResult>('/sender/jobs', { method: 'POST', body: JSON.stringify(payload) }),
   senderJob: (id: string) => request<SenderJobResult>(`/sender/jobs/${id}`),
   senderHistoryAi: (id: string) => request<SenderAiLog[]>(`/sender/history/${id}/ai`),
+  retrySenderJob: (id: string) =>
+    request<{ request_id: string }>(`/sender/history/${id}/retry`, { method: 'POST' }),
   senderProgress: () => request<{ running: boolean; steps: string[] }>('/sender/progress'),
   senderStatus: () => request<{ connected: boolean }>('/sender/status'),
   restartAdb: () => request<{ connected: boolean }>('/sender/adb/restart', { method: 'POST' }),

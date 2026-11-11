@@ -6,7 +6,7 @@ from contextlib import closing
 from pathlib import Path
 from time import time
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 router = APIRouter(prefix="/api/sender")
 root = Path(__file__).resolve().parents[1] / "local-data" / "sender"
 MAX_ASSET = 20 * 1024 * 1024
-HISTORY_LIMIT = 1000
+HISTORY_LIMIT = 100
 
 
 class Target(BaseModel):
@@ -165,6 +165,24 @@ def sender_history(offset: int = 0, limit: int = 50):
         ).fetchall()
     return [{"id": key, "source": source, "created_ms": created, "target": json.loads(payload)["target"],
              "status": json.loads(result)["status"]} for key, source, created, payload, result in rows]
+
+
+@router.post("/history/{request_id}/retry", status_code=202)
+def retry_sender_job(request_id: UUID, tasks: BackgroundTasks):
+    with closing(database()) as conn:
+        row = conn.execute(
+            "SELECT j.payload, j.result FROM sender_history h JOIN jobs j ON j.id=h.job_id WHERE h.job_id=?",
+            (str(request_id),),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(404, "原任务不存在")
+    if json.loads(row[1])["status"] in {"queued", "running"}:
+        raise HTTPException(409, "请等原任务执行结束后再重试")
+    original = Job.model_validate_json(row[0])
+    job = original.model_copy(update={"request_id": uuid4()})
+    result, _ = queue_job(job, source="retry")
+    tasks.add_task(run, job, result)
+    return result
 
 
 @router.get("/history/{request_id}/ai")

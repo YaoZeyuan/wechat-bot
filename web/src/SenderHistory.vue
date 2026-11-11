@@ -10,10 +10,12 @@ const aiError = ref('')
 const offset = ref(0)
 const busy = ref(false)
 const error = ref('')
+const retryTarget = ref<SenderHistoryItem>()
+const retrying = ref(false)
 const sources: Record<string, string> = {
   manual: '手动发送', fixed_reply: '测试', daily_activity: '活跃日榜',
   total_activity: '活跃总榜', total_lurkers: '潜水总榜',
-  ai_chat: 'AI 问答',
+  ai_chat: 'AI 问答', retry: '重试发送',
 }
 const statuses: Record<string, string> = {
   queued: '排队中', running: '执行中', completed: '完成', failed: '失败', uncertain: '待核对',
@@ -63,20 +65,37 @@ async function select(record: SenderHistoryItem) {
   }
 }
 
+async function retry() {
+  if (!retryTarget.value || retrying.value) return
+  retrying.value = true
+  error.value = ''
+  try {
+    const result = await api.retrySenderJob(retryTarget.value.id)
+    retryTarget.value = undefined
+    await load(0)
+    const record = records.value.find(item => item.id === result.request_id)
+    if (record) await select(record)
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    retrying.value = false
+  }
+}
+
 onMounted(() => void load(0))
 </script>
 
 <template>
   <main class="page">
     <h1>Sender 日志</h1>
-    <p class="hint">保留最近 1000 条任务。点击任务查看操作步骤和当时的手机画面。</p>
+    <p class="hint">保留最近 100 条任务。点击任务查看操作步骤和当时的手机画面。</p>
     <a-alert v-if="error" type="error">{{ error }}</a-alert>
     <div class="grid">
       <section class="card">
         <div class="row">
           <a-button :disabled="busy" @click="load(0)">刷新</a-button>
           <a-button :disabled="busy || offset === 0" @click="load(offset - 50)">上一页</a-button>
-          <a-button :disabled="busy || records.length < 50 || offset >= 950" @click="load(offset + 50)">下一页</a-button>
+          <a-button :disabled="busy || records.length < 50 || offset >= 50" @click="load(offset + 50)">下一页</a-button>
         </div>
         <p v-if="!records.length && !busy">暂无发送任务。</p>
         <ul class="records">
@@ -91,6 +110,8 @@ onMounted(() => void load(0))
       </section>
       <section class="card">
         <h2>{{ selected?.target.name ?? '操作步骤' }}</h2>
+        <a-button v-if="selected && detail" :disabled="busy || retrying || ['queued', 'running'].includes(detail.status)"
+          @click="retryTarget = selected">重试任务</a-button>
         <p v-if="!selected">请先选择一条任务。</p>
         <section v-if="selected?.source === 'ai_chat'">
           <h3>模型调用</h3>
@@ -123,6 +144,11 @@ onMounted(() => void load(0))
         </ol>
       </section>
     </div>
+    <a-modal :visible="!!retryTarget" title="重试 Sender 任务" :ok-loading="retrying"
+      ok-text="创建并执行" @ok="retry" @cancel="!retrying && (retryTarget = undefined)">
+      将新建任务并从第一条消息开始执行，沿用原任务的发送或演练模式。实际发送过的内容可能重复送达。
+      <a-alert v-if="error" type="error">{{ error }}</a-alert>
+    </a-modal>
   </main>
 </template>
 

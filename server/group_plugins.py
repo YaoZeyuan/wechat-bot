@@ -146,12 +146,12 @@ def dispatch(source, automation, event, *, quotes=None):
         replies.append((plugin_id, text))
     question = ai_chat.trigger(event.text) if legacy.get(ai_chat.PLUGIN_ID, False) else None
     if question:
-        route, prompt = question
-        question = route, ai_chat.with_quotes(prompt, quotes or [])
         replies.append((ai_chat.PLUGIN_ID, ""))
     if not replies:
         return
-    details = source.conversation_details([event.group_id]).get(event.group_id, {})
+    identities = [event.group_id, event.sender_id] if question else [event.group_id]
+    contacts = source.conversation_details(identities)
+    details = contacts.get(event.group_id, {})
     name = details.get("remark") or details.get("original_name") or event.group_id
     for plugin_id, text in replies:
         request_id = uuid5(NAMESPACE_URL, f"wechat-bot:{event.group_id}:{event.message_id}:{plugin_id}")
@@ -164,7 +164,10 @@ def dispatch(source, automation, event, *, quotes=None):
             else:
                 continue
             try:
-                text = ai_chat.answer(*question, request_id=str(request_id))
+                author = contacts.get(event.sender_id, {})
+                name_hint = author.get("remark") or author.get("original_name") or ""
+                prompt = ai_chat.format_question(event.text, name_hint, quotes or [])
+                text = ai_chat.answer(question[0], prompt, request_id=str(request_id))
             except ai_chat.ChatError as exc:
                 text = f"AI 问答暂不可用：{exc}"
         job = Job(
