@@ -242,3 +242,7 @@ uv run python -m server.export_history --snapshot local-data/snapshot --account 
 现阶段支持文字演练和发送。原版和双开版的可读性需要在目标手机上分别验证。
 
 参考项目 [wechat-rpa-demo](https://github.com/AbbottKilig/wechat-rpa-demo)。
+
+### 部分手机上的微信无障碍兼容性
+
+在单微信测试机上，系统设置可读但微信只返回空根节点。临时同时启用系统 TalkBack 后，Sender 能读取微信分享页并发送消息。若同一台手机复现此现象，可在系统无障碍设置中启用 TalkBack，再打开微信。TalkBack 会改变触摸手势，停用后微信节点可能再次缺失。

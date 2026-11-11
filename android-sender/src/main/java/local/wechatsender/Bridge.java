@@ -84,7 +84,8 @@ public final class Bridge extends AccessibilityService {
             return status;
         }
         if (action.equals("share_status")) {
-            return new JSONObject().put("ready", !matching(named("最近聊天")).isEmpty());
+            return new JSONObject().put("ready", !matching(named("最近聊天")).isEmpty())
+                .put("sent_confirmation", sentConfirmation() != null);
         }
         String target = request.getString("target");
         if (action.equals("share")) return shareAsset(request, target, clicked);
@@ -197,9 +198,9 @@ public final class Bridge extends AccessibilityService {
         click(send);
         for (int attempt = 0; attempt < 8; attempt++) {
             pause();
-            List<AccessibilityNodeInfo> stay = matching(named("留在微信"));
-            if (stay.size() == 1 && !matching(named("已发送")).isEmpty()) {
-                try { click(stay.get(0)); }
+            AccessibilityNodeInfo stay = sentConfirmation();
+            if (stay != null) {
+                try { click(stay); }
                 catch (IOException error) { android.util.Log.w("WeChatSender", "发送已确认，未能关闭成功提示", error); }
                 return new JSONObject();
             }
@@ -212,6 +213,10 @@ public final class Bridge extends AccessibilityService {
         throw new IOException("已点击分享发送，但未核对到消息，请在会话中确认");
     }
 
+    private AccessibilityNodeInfo sentConfirmation() {
+        List<AccessibilityNodeInfo> stay = matching(named("留在微信"));
+        return stay.size() == 1 && !matching(named("已发送")).isEmpty() ? stay.get(0) : null;
+    }
     private static boolean truncatedFilename(String shown, String filename) {
         String[] parts = shown.split("\\.\\.\\.|…", -1);
         return parts.length == 2 && parts[0].length() >= 4 && parts[1].length() >= 4
