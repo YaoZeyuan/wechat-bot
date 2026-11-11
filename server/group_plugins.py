@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from .reply import MessageEvent
 from .plugin import ai_chat
@@ -14,13 +14,11 @@ PATH = Path(__file__).resolve().parents[1] / "local-data" / "group-plugins.json"
 LOCK = Lock()
 BEIJING = timezone(timedelta(hours=8))
 RANKINGS = {"daily_activity": "活跃日榜", "total_activity": "活跃总榜", "total_lurkers": "潜水总榜"}
-BUILTINS = ("fixed_reply", *RANKINGS)
+BUILTINS = tuple(RANKINGS)
 
 
 class Settings(BaseModel):
     enabled: bool
-    keyword: str = Field(default="测试", min_length=1, max_length=200)
-    reply: str = Field(default="测试成功", min_length=1, max_length=1800)
 
 
 def read_all():
@@ -34,15 +32,13 @@ def config(group_id, plugin_id, legacy):
         value = read_all().get(group_id, {}).get(plugin_id)
     if value is not None:
         return Settings.model_validate(value)
-    return Settings(enabled=legacy.get(plugin_id, plugin_id == "fixed_reply"))
+    return Settings(enabled=legacy.get(plugin_id, False))
 
 
 def save(group_id, plugin_id, settings):
     with LOCK:
         data = read_all()
-        data.setdefault(group_id, {})[plugin_id] = settings.model_dump(
-            include={"enabled"} if plugin_id in RANKINGS else None
-        )
+        data.setdefault(group_id, {})[plugin_id] = settings.model_dump()
         PATH.parent.mkdir(parents=True, exist_ok=True)
         pending = PATH.with_suffix(".tmp")
         pending.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -126,7 +122,7 @@ def activity_board(source, event, rows, *, start, limit, members=None):
     return "\n".join(lines)
 
 
-def dispatch(source, automation, event):
+def dispatch(source, automation, event, *, quotes=None):
     from uuid import NAMESPACE_URL, uuid5
 
     from fastapi import HTTPException
@@ -135,11 +131,8 @@ def dispatch(source, automation, event):
 
     legacy = automation.group_plugins(event.group_id)
     replies = []
-    test = config(event.group_id, "fixed_reply", legacy)
-    if test.enabled and event.text == test.keyword:
-        replies.append(("fixed_reply", test.reply))
     for plugin_id, keyword in RANKINGS.items():
-        if event.text != keyword or not config(event.group_id, plugin_id, legacy).enabled:
+        if quotes is not None or event.text != keyword or not config(event.group_id, plugin_id, legacy).enabled:
             continue
         if plugin_id == "daily_activity":
             text = daily_activity(source, event)
@@ -153,9 +146,11 @@ def dispatch(source, automation, event):
         replies.append((plugin_id, text))
     question = ai_chat.trigger(event.text) if legacy.get(ai_chat.PLUGIN_ID, False) else None
     if question:
+        route, prompt = question
+        question = route, ai_chat.with_quotes(prompt, quotes or [])
         replies.append((ai_chat.PLUGIN_ID, ""))
     if not replies:
-        return False
+        return
     details = source.conversation_details([event.group_id]).get(event.group_id, {})
     name = details.get("remark") or details.get("original_name") or event.group_id
     for plugin_id, text in replies:
@@ -180,4 +175,3 @@ def dispatch(source, automation, event):
         result, inserted = queue_job(job, strict=False, source=plugin_id)
         if inserted:
             run(job, result)
-    return test.enabled and event.text == test.keyword

@@ -17,7 +17,6 @@ from tempfile import NamedTemporaryFile
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, SecretStr
-from sender import SendError, create_sender
 
 from .ciphertalk import CipherTalk, SourceError
 from .sqlcipher_reader import SqlCipherReader
@@ -26,7 +25,7 @@ from .automation import Automation, GroupLimitError, MAX_MONITORED_GROUPS, Rule
 from .plugins import HANDLERS, PLUGINS
 from . import group_plugins as builtin_plugins
 from .polling import incoming_text, message_id, poll_group
-from .reply import MessageEvent, SendTask
+from .reply import SendTask
 
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
 log = structlog.get_logger("wechat_bot.reader")
@@ -34,7 +33,6 @@ automation = Automation(Path(__file__).resolve().parent.parent / "automation.db"
 reader_status = {"enabled": False, "running": False, "error": None, "last_success_at": None, "interval_seconds": 5}
 monitoring_wake: asyncio.Event | None = None
 key_extraction_lock = Lock()
-test_send_lock = Lock()
 key_progress = {"stage": "idle", "message": "", "steps": []}
 profile_path = Path(__file__).resolve().parent.parent / "local-data" / "reader-profile.json"
 
@@ -146,7 +144,7 @@ async def set_status(settings: MonitoringSettings) -> dict:
 
 @router.get("/rules")
 def rules() -> dict:
-    return {"items": automation.rules(), "handlers": [*HANDLERS, "webhook"]}
+    return {"items": automation.rules(), "handlers": list(HANDLERS)}
 
 
 @router.put("/rules")
@@ -173,14 +171,7 @@ class RulePreview(BaseModel):
 def preview_rule(request: RulePreview) -> dict:
     rule = request.rule
     matched = rule.enabled and request.text.strip() == rule.keyword
-    reply = None
-    if matched and rule.handler == "fixed_reply":
-        event = MessageEvent(
-            group_id=rule.group_id, message_id="preview", sender_id="preview",
-            timestamp_ms=1, text=request.text,
-        )
-        reply = HANDLERS[rule.handler](event)
-    return {"matched": matched, "handler": rule.handler, "reply": reply}
+    return {"matched": matched, "handler": rule.handler, "reply": None}
 
 
 @router.get("/plugins")
@@ -371,9 +362,7 @@ def list_group_plugins(group_id: str) -> list[dict]:
     settings = automation.group_plugins(group_id)
     return [
         {"id": plugin_id, **meta, **(
-            builtin_plugins.config(group_id, plugin_id, settings).model_dump(
-                include=None if plugin_id == "fixed_reply" else {"enabled"}
-            ) if plugin_id in builtin_plugins.BUILTINS else
+            builtin_plugins.config(group_id, plugin_id, settings).model_dump() if plugin_id in builtin_plugins.BUILTINS else
             {"enabled": settings.get(plugin_id, meta["default_enabled"])}
         )}
         for plugin_id, meta in PLUGINS.items()
@@ -385,42 +374,11 @@ def update_group_plugin(group_id: str, plugin_id: str, settings: GroupPluginSett
     if plugin_id not in PLUGINS or not any(item["group_id"] == group_id for item in automation.monitored_groups()):
         raise HTTPException(404, "未找到所选群或插件")
     if plugin_id in builtin_plugins.BUILTINS:
-        if plugin_id == "fixed_reply" and not settings.reply.strip():
-            raise HTTPException(422, "回复文字不能为空")
         builtin_plugins.save(group_id, plugin_id, settings)
     else:
         automation.set_group_plugin(group_id, plugin_id, settings.enabled)
     log.info("desktop_group_plugin_changed", group_id=group_id, plugin_id=plugin_id, enabled=settings.enabled)
     return next(item for item in list_group_plugins(group_id) if item["id"] == plugin_id)
-
-
-@router.post("/monitored-groups/{group_id}/test-send")
-def test_send_to_group(group_id: str) -> dict:
-    group = next((item for item in automation.monitored_groups() if item["group_id"] == group_id), None)
-    if not group or not group["enabled"]:
-        raise HTTPException(409, "请先启用该群机器人")
-    plugin = builtin_plugins.config(group_id, "fixed_reply", automation.group_plugins(group_id))
-    if not plugin.enabled:
-        raise HTTPException(409, "请先启用该群的「测试消息」插件")
-    if not test_send_lock.acquire(blocking=False):
-        raise HTTPException(409, "已有测试消息正在发送")
-    try:
-        details = history_source().conversation_details([group_id]).get(group_id, {})
-        target = details.get("original_name") or details.get("remark") or group["name"]
-        if target == group_id:
-            raise SourceError("未取得群名称，无法核对手机聊天标题")
-        reply_text = plugin.reply
-        sender = create_sender(dry_run=False)
-        sender.connect()
-        if not sender.send(target, reply_text, current_chat=True):
-            raise SendError("发送后未能确认结果，请先在手机查看，避免重复发送")
-    except (SourceError, SendError) as exc:
-        log.warning("group_test_send_failed", group_id=group_id, error=str(exc))
-        raise HTTPException(502, str(exc)) from None
-    finally:
-        test_send_lock.release()
-    log.info("group_test_send_succeeded", group_id=group_id)
-    return {"ok": True}
 
 
 @router.get("/history/details")

@@ -226,10 +226,13 @@ class SqlCipherReader:
 
         with ExitStack() as stack:
             streams = []
+            lookup_dbs = []
             for path in shards:
                 db = stack.enter_context(self.open(path))
                 if not db.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
                     continue
+                if any(column[1] == "server_id" for column in db.execute(f'PRAGMA table_info("{table}")')):
+                    lookup_dbs.append(db)
                 cursor = db.execute(f"""
                     SELECT m.local_id, m.sort_seq, m.create_time, m.local_type,
                            m.message_content, n.user_name
@@ -240,13 +243,24 @@ class SqlCipherReader:
             merged = heapq.merge(
                 *streams, key=lambda pair: (pair[0]["sort_seq"], pair[0]["local_id"], pair[1]), reverse=True,
             )
-            for row, shard in merged:
-                yield self.message(row, shard)
+            def lookup_quote(server_id):
+                if not server_id.isascii() or not server_id.isdecimal() or len(server_id) > 19:
+                    return None
+                for db in lookup_dbs:
+                    original = db.execute(f"""
+                        SELECT m.message_content, n.user_name
+                        FROM "{table}" AS m LEFT JOIN Name2Id AS n ON n.rowid=m.real_sender_id
+                        WHERE m.server_id=? LIMIT 1
+                    """, (server_id,)).fetchone()
+                    if original is not None:
+                        return self.decode_content(original["message_content"], original["user_name"], 49)
+                return None
 
-    def message(self, row, shard):
-        sender = row["user_name"]
-        content = row["message_content"]
-        type_code = row["local_type"] & 0xFFFFFFFF
+            for row, shard in merged:
+                yield self.message(row, shard, lookup_quote)
+
+    @staticmethod
+    def decode_content(content, sender, type_code):
         if type_code in (1, 49) and isinstance(content, bytes):
             if content.startswith(bytes.fromhex("28b52ffd")):
                 import zstandard
@@ -260,30 +274,106 @@ class SqlCipherReader:
             content = content.decode("utf-8", errors="replace")
         if isinstance(content, str) and sender and content.startswith(sender + ":\n"):
             content = content[len(sender) + 2:]
-        card = self.app_card(content) if type_code == 49 and isinstance(content, str) else None
+        return content
+
+    def message(self, row, shard, lookup_quote=None):
+        sender = row["user_name"]
+        type_code = row["local_type"] & 0xFFFFFFFF
+        content = self.decode_content(row["message_content"], sender, type_code)
+        card = self.app_card(content, lookup_quote) if type_code == 49 and isinstance(content, str) else None
         link = card if card and card.get("url") else None
+        quote = card if card and "quotes" in card else None
         return {
             "messageId": f'{shard}:{row["local_id"]}',
             "timestampMs": row["create_time"] * 1000,
             "direction": "out" if sender == self.account else "in",
-            "kind": "text" if type_code == 1 else "link" if link else "other",
+            "kind": "text" if type_code == 1 else "quote" if quote else "link" if link else "other",
             "type_code": row["local_type"],
             "sender": {"username": sender},
-            "text": content if type_code == 1 and isinstance(content, str) else "",
+            "text": quote["title"] if quote else content if type_code == 1 and isinstance(content, str) else "",
             "link": link,
-            "file_name": card["title"] if card and not link else None,
+            "file_name": card["title"] if card and not link and not quote else None,
+            "quotes": quote["quotes"] if quote else [],
         }
 
     @staticmethod
-    def app_card(content: str):
+    def app_element(content: str):
         if len(content) > 1024 * 1024:
             return None
+        root = ET.fromstring(content.strip())
+        return root if root.tag == "appmsg" else root.find("appmsg")
+
+    @staticmethod
+    def quote_lines(app, lookup_quote=None):
+        labels = {"3": "图片", "34": "语音", "43": "视频", "47": "动画表情", "42": "名片", "48": "位置"}
+        lines = []
+        seen = set()
+        for depth in range(3):
+            refer = app.find("refermsg")
+            if refer is None:
+                break
+            server_id = (refer.findtext("svrid") or "").strip()
+            if server_id and server_id != "0":
+                if server_id in seen:
+                    break
+                seen.add(server_id)
+            sender = (refer.findtext("displayname") or "").strip()
+            if sender.startswith("wxid_"):
+                sender = ""
+            kind = (refer.findtext("type") or "").strip()
+            body = refer.find("content")
+            raw = (body.text or "").strip() if body is not None else ""
+            nested = None
+            if kind in {"49", "57", "2001"}:
+                if body is not None:
+                    nested = body.find("appmsg")
+                    if nested is None:
+                        nested = body.find("msg/appmsg")
+                if nested is None and raw.startswith("<"):
+                    try:
+                        nested = SqlCipherReader.app_element(raw)
+                    except ET.ParseError:
+                        pass
+                nested_kind = (nested.findtext("type") or "").strip() if nested is not None else ""
+                nested_refer = nested.find("refermsg") if nested_kind == "57" else None
+                if (depth < 2 and lookup_quote and server_id and server_id != "0"
+                        and (kind == "57" or nested_kind == "57")
+                        and (nested_refer is None or not len(nested_refer))):
+                    original = lookup_quote(server_id)
+                    if original:
+                        try:
+                            restored = SqlCipherReader.app_element(original)
+                            if restored is not None and (restored.findtext("type") or "").strip() == "57":
+                                nested = restored
+                        except ET.ParseError:
+                            pass
+                if kind == "2001" or nested_kind == "2001":
+                    packet = nested if nested is not None else body
+                    greeting = (packet.findtext(".//receivertitle") or packet.findtext(".//sendertitle") or "").strip() if packet is not None else ""
+                    raw = f"[红包] {greeting}" if greeting else "[红包]"
+                else:
+                    raw = (nested.findtext("title") or "").strip() if nested is not None else ""
+                    if kind == "49" and not raw and nested_kind != "57":
+                        raw = "[链接]"
+            label = labels.get(kind)
+            lines.append({"sender": sender, "text": f"[{label}]" if label else raw or "[引用消息]"})
+            if depth == 2 or nested is None or (nested.findtext("type") or "").strip() != "57":
+                break
+            next_refer = nested.find("refermsg")
+            if next_refer is None or not len(next_refer):
+                break
+            app = nested
+        return lines
+
+    @staticmethod
+    def app_card(content: str, lookup_quote=None):
         try:
-            root = ET.fromstring(content.strip())
-            app = root if root.tag == "appmsg" else root.find("appmsg")
+            app = SqlCipherReader.app_element(content)
             if app is None:
                 return None
             kind = (app.findtext("type") or "").strip()
+            if kind == "57":
+                return {"title": (app.findtext("title") or "").strip(), "quotes": SqlCipherReader.quote_lines(app, lookup_quote)}
             title = (app.findtext("title") or "").strip()[:300]
             if kind == "6":
                 return {"title": title}

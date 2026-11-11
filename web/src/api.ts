@@ -22,12 +22,25 @@ export interface HistoryMessage {
   messageId: string
   timestampMs: number
   direction: 'in' | 'out'
-  kind: 'text' | 'link' | 'other'
+  kind: 'text' | 'link' | 'quote' | 'other'
+  quotes?: { sender: string; text: string }[]
   link?: { url: string; title: string; description: string; source: string; cover: string } | null
   file_name?: string | null
   type_code: number
   sender: { username: string | null; display_name: string | null }
   text: string
+}
+
+export interface SenderAiLog {
+  msg: string
+  timestamp?: string
+  provider?: string
+  model?: string
+  url?: string
+  status?: number
+  elapsed_seconds?: number
+  request_body?: string
+  response_body?: string
 }
 
 export interface KeywordRule {
@@ -61,8 +74,6 @@ export interface GroupPlugin {
   enabled: boolean
   version: string
   capability: string
-  keyword?: string
-  reply?: string
 }
 
 interface Delivery {
@@ -134,21 +145,20 @@ export const api = {
   submitSenderJob: (payload: unknown) =>
     request<SenderJobResult>('/sender/jobs', { method: 'POST', body: JSON.stringify(payload) }),
   senderJob: (id: string) => request<SenderJobResult>(`/sender/jobs/${id}`),
+  senderHistoryAi: (id: string) => request<SenderAiLog[]>(`/sender/history/${id}/ai`),
   senderProgress: () => request<{ running: boolean; steps: string[] }>('/sender/progress'),
   senderStatus: () => request<{ connected: boolean }>('/sender/status'),
   restartAdb: () => request<{ connected: boolean }>('/sender/adb/restart', { method: 'POST' }),
   sendFromConsole: (payload: SendPayload) =>
     request<SendResult>('/sender/send', { method: 'POST', body: JSON.stringify(payload) }),
   pluginCatalog: () => request<(Omit<GroupPlugin, 'enabled'> & { default_enabled: boolean })[]>('/reader/plugins'),
-  sendGroupTest: (groupId: string) =>
-    request<{ ok: boolean }>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/test-send`, { method: 'POST' }),
   conversationDetails: (session_id: string) =>
     request<ConversationDetails>(`/reader/history/details?${new URLSearchParams({ session_id })}`),
   groupPlugins: (groupId: string) =>
     request<GroupPlugin[]>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins`),
-  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean, keyword?: string, reply?: string) =>
+  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean) =>
     request<GroupPlugin>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins/${encodeURIComponent(pluginId)}`, {
-      method: 'PUT', body: JSON.stringify({ enabled, keyword, reply }),
+      method: 'PUT', body: JSON.stringify({ enabled }),
     }),
   monitoredGroups: () => request<MonitoredGroup[]>('/reader/monitored-groups'),
   saveMonitoredGroup: (group: MonitoredGroup) =>

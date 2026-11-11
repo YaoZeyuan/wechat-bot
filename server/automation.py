@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import HttpUrl, model_validator
 
-from .plugins import HANDLERS, PLUGINS, PluginActionError, WebhookError, call_webhook
+from .plugins import HANDLERS, PLUGINS, PluginActionError
 from .reply import ContractModel, MessageEvent, NonEmpty, SendTask
 
 log = structlog.get_logger("wechat_bot.automation")
@@ -23,16 +23,13 @@ class GroupLimitError(ValueError):
 class Rule(ContractModel):
     group_id: NonEmpty
     keyword: NonEmpty
-    handler: NonEmpty = "fixed_reply"
+    handler: NonEmpty = "open_baidu"
     url: HttpUrl | None = None
     enabled: bool = True
 
     @model_validator(mode="after")
     def validate_handler(self):
-        if self.handler == "webhook":
-            if self.url is None:
-                raise ValueError("Webhook URL required")
-        elif self.handler not in HANDLERS or self.url is not None:
+        if self.handler not in HANDLERS or self.url is not None:
             raise ValueError("Invalid local handler")
         return self
 
@@ -148,7 +145,9 @@ class Automation:
             if enabled and plugin_id == "open_baidu":
                 rule = Rule(group_id=group_id, keyword="测试", handler=plugin_id)
                 db.execute(
-                    "INSERT INTO rules VALUES (?,?,?) ON CONFLICT(group_id, keyword) DO NOTHING",
+                    "INSERT INTO rules VALUES (?,?,?) ON CONFLICT(group_id, keyword) "
+                    "DO UPDATE SET config=excluded.config "
+                    "WHERE json_extract(rules.config, '$.handler') IN ('fixed_reply', 'webhook')",
                     (group_id, rule.keyword, rule.model_dump_json()),
                 )
 
@@ -181,7 +180,7 @@ class Automation:
     def rules(self) -> list[Rule]:
         with self.database() as db:
             return [Rule.model_validate_json(row["config"]) for row in db.execute(
-                "SELECT config FROM rules ORDER BY group_id, keyword"
+                "SELECT config FROM rules WHERE json_extract(config, '$.handler') = 'open_baidu' ORDER BY group_id, keyword"
             )]
 
     def deliveries(self) -> list[dict]:
@@ -202,26 +201,22 @@ class Automation:
                 "DO UPDATE SET message_id=excluded.message_id", (group_id, message_id),
             )
 
-    def dispatch(self, event: MessageEvent, *, skip_fixed=False) -> Literal["unmatched", "duplicate", "pending", "acknowledged", "failed"]:
+    def dispatch(self, event: MessageEvent) -> Literal["unmatched", "duplicate", "pending", "acknowledged", "failed"]:
         with self.database() as db:
             row = db.execute(
-                "SELECT config FROM rules WHERE group_id=? AND keyword=?",
+                "SELECT config FROM rules WHERE group_id=? AND keyword=? AND json_extract(config, '$.handler') = 'open_baidu'",
                 (event.group_id, event.text.strip()),
             ).fetchone()
             if row is None:
                 return "unmatched"
             rule = Rule.model_validate_json(row["config"])
-            if not rule.enabled or (skip_fixed and rule.handler == "fixed_reply"):
+            if not rule.enabled:
                 return "unmatched"
             plugin = db.execute(
                 "SELECT enabled FROM group_plugins WHERE group_id=? AND plugin_id=?",
                 (event.group_id, rule.handler),
             ).fetchone()
             enabled = bool(plugin["enabled"]) if plugin is not None else PLUGINS[rule.handler]["default_enabled"]
-            if rule.handler == "fixed_reply":
-                from .group_plugins import config
-
-                enabled = config(event.group_id, rule.handler, {rule.handler: enabled}).enabled
             if not enabled:
                 return "unmatched"
             inserted = db.execute(
@@ -243,7 +238,7 @@ class Automation:
         with self.database() as db:
             claimed = db.execute(
                 "UPDATE deliveries SET status='processing', error=NULL "
-                "WHERE id=? AND status='failed' AND EXISTS (SELECT 1 FROM delivery_inputs WHERE id=?)",
+                "WHERE id=? AND status='failed' AND EXISTS (SELECT 1 FROM delivery_inputs WHERE id=? AND json_extract(rule, '$.handler') = 'open_baidu')",
                 (delivery_id, delivery_id),
             )
             if not claimed.rowcount:
@@ -264,16 +259,13 @@ class Automation:
     def execute(self, delivery_id: int, rule: Rule, event: MessageEvent) -> Literal["pending", "acknowledged", "failed"]:
         task = error = None
         try:
-            reply = (
-                call_webhook(rule.url, event, str(delivery_id))
-                if rule.url is not None else HANDLERS[rule.handler](event)
-            )
+            reply = HANDLERS[rule.handler](event)
             status = "pending" if reply else "acknowledged"
             if reply:
                 task = SendTask.from_event(event, reply).model_dump_json()
         except Exception as exc:
             status = "failed"
-            error = str(exc) if isinstance(exc, (WebhookError, PluginActionError)) else type(exc).__name__
+            error = str(exc) if isinstance(exc, PluginActionError) else type(exc).__name__
         with self.database() as db:
             db.execute(
                 "UPDATE deliveries SET status=?,task=?,error=? WHERE id=?",

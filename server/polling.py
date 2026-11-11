@@ -25,7 +25,7 @@ def message_id(row: dict) -> str:
 def incoming_text(group_id: str, row: dict, identity: str) -> MessageEvent | None:
     if row.get("direction") != "in":
         return None
-    if row.get("kind", str(row.get("type"))) not in {"text", "1"}:
+    if row.get("kind", str(row.get("type"))) not in {"text", "1", "quote"}:
         return None
     sender = (row.get("sender") or {}).get("username") or row.get("senderUsername")
     timestamp = row.get("timestampMs") or int(row.get("createTime") or 0) * 1000
@@ -75,8 +75,11 @@ def poll_group(source, automation: Automation, group_id: str, source_id: str = "
     for identity, row in reversed(newer.items()):
         event = incoming_text(group_id, row, f"{source_id}:{identity}" if source_id else identity)
         if event is not None:
-            handled_test = dispatch_builtin(source, automation, event)
-            automation.dispatch(event, skip_fixed=handled_test)
+            if row.get("kind") == "quote":
+                dispatch_builtin(source, automation, event, quotes=row.get("quotes") or [])
+            else:
+                dispatch_builtin(source, automation, event)
+                automation.dispatch(event)
     automation.save_cursor(cursor_key, next(iter(newer)))
     log.info("desktop_messages_processed", count=len(newer))
     return len(newer)

@@ -65,8 +65,7 @@ def trigger(text: str) -> tuple[str, str] | None:
             alias = alias.strip()
             if not alias:
                 continue
-            boundary = r"(?:\s+|(?=[^\x00-\x7f]))" if alias.isascii() else r"\s*"
-            match = re.match(re.escape(alias) + boundary, text, re.IGNORECASE)
+            match = re.match(re.escape(alias) + r"\s*", text, re.IGNORECASE)
             if match and (prompt := text[match.end():]).strip():
                 candidates.append((len(alias), route_id, prompt))
     if candidates:
@@ -75,6 +74,17 @@ def trigger(text: str) -> tuple[str, str] | None:
         if len(matches) == 1:
             return matches.pop()
     return None
+
+
+def with_quotes(prompt: str, quotes: list[dict[str, str]]) -> str:
+    if not quotes:
+        return prompt
+    lines = [prompt, ""]
+    for index, quote in enumerate(quotes[:3], 1):
+        sender = f'{quote["sender"]}：' if quote.get("sender") else ""
+        marker = ">" * index
+        lines.extend(f"{marker} {line}" for line in (sender + quote["text"]).split("\n"))
+    return "\n".join(lines)
 
 
 def answer(prefix: str, prompt: str, *, request_id: str | None = None) -> str:

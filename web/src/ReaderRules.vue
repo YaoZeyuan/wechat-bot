@@ -7,7 +7,7 @@ const route = useRoute()
 const isGroupPage = computed(() => route.path === '/group')
 const groupId = computed(() => typeof route.query.group === 'string' ? route.query.group : '')
 const initialGroup = groupId.value
-const rule = ref<KeywordRule>({ group_id: initialGroup, keyword: '', handler: 'fixed_reply', url: null, enabled: true })
+const rule = ref<KeywordRule>({ group_id: initialGroup, keyword: '', handler: 'open_baidu', url: null, enabled: true })
 const rules = ref<KeywordRule[]>([])
 const handlers = ref<string[]>([])
 const deliveries = ref<Awaited<ReturnType<typeof api.readerDeliveries>>['items']>([])
@@ -26,14 +26,12 @@ const currentDeliveries = computed(() => deliveries.value.filter(item => item.gr
 const enabledCount = computed(() => monitored.value.filter(group => group.enabled).length)
 const plugins = ref<GroupPlugin[]>([])
 const pluginError = ref('')
-const confirmTest = ref(false)
-const phoneGroupName = computed(() => currentGroup.value?.original_name || currentGroup.value?.remark || currentGroup.value?.name)
 const refreshError = ref('')
 let refreshTimer: number | undefined
 let refreshing = false
 
 function selectGroup(id: string) {
-  rule.value = { group_id: id, keyword: '', handler: 'fixed_reply', url: null, enabled: true }
+  rule.value = { group_id: id, keyword: '', handler: 'open_baidu', url: null, enabled: true }
   editing.value = false
   preview.value = undefined
 }
@@ -65,7 +63,7 @@ function savePlugin(plugin: GroupPlugin, enabled: boolean) {
   const id = currentGroup.value?.group_id
   if (!id) return
   return run(async () => {
-    const updated = await api.saveGroupPlugin(id, plugin.id, enabled, plugin.keyword, plugin.reply)
+    const updated = await api.saveGroupPlugin(id, plugin.id, enabled)
     if (currentGroup.value?.group_id === id) {
       plugins.value = plugins.value.map(item => item.id === updated.id ? updated : item)
       if (updated.id === 'open_baidu' && updated.enabled) {
@@ -78,16 +76,6 @@ function savePlugin(plugin: GroupPlugin, enabled: boolean) {
         }
       }
     }
-  })
-}
-
-function sendTest() {
-  confirmTest.value = false
-  const id = currentGroup.value?.group_id
-  if (!id) return
-  return run(async () => {
-    await api.sendGroupTest(id)
-    notice.value = '已确认发送测试回复。'
   })
 }
 
@@ -120,7 +108,7 @@ function save() {
   return run(async () => {
     await api.saveReaderRule({
       ...rule.value,
-      url: rule.value.handler === 'webhook' ? rule.value.url : null,
+      url: null,
     })
     await load()
     notice.value = '规则已保存。'
@@ -144,7 +132,7 @@ function previewCurrentRule() {
   return run(async () => {
     preview.value = await api.previewReaderRule({
       ...rule.value,
-      url: rule.value.handler === 'webhook' ? rule.value.url : null,
+      url: null,
     }, sample.value)
   })
 }
@@ -286,16 +274,8 @@ onUnmounted(() => window.clearInterval(refreshTimer))
           <ul v-if="plugins.length" class="compact-list">
             <li v-for="plugin in plugins" :key="plugin.id">
               <div class="identity"><strong>{{ plugin.name }}</strong><small>{{ plugin.description }}</small></div>
-              <div v-if="plugin.id === 'fixed_reply'" class="identity">
-                <label>触发关键词 <a-input v-model="plugin.keyword" :max-length="200" :disabled="busy" /></label>
-                <label>回复内容 <a-textarea v-model="plugin.reply" :max-length="1800" :disabled="busy" /></label>
-                <a-button size="small" :disabled="busy || !plugin.keyword || !plugin.reply?.trim()"
-                  @click="savePlugin(plugin, plugin.enabled)">保存参数</a-button>
-              </div>
               <a-tag :color="plugin.enabled ? 'green' : 'gray'">{{ plugin.enabled ? '启用' : '停用' }}</a-tag>
               <a-button size="small" :disabled="busy" @click="savePlugin(plugin, !plugin.enabled)">{{ plugin.enabled ? '停用' : '启用' }}</a-button>
-              <a-button v-if="plugin.id === 'fixed_reply'" size="small" type="primary"
-                :disabled="busy || !plugin.enabled || !currentGroup.enabled" @click="confirmTest = true">发送测试消息</a-button>
             </li>
           </ul>
           <h3>触发规则</h3>
@@ -323,9 +303,6 @@ onUnmounted(() => window.clearInterval(refreshTimer))
                 </option>
               </select>
             </label>
-            <label v-if="rule.handler === 'webhook'">回调地址
-              <input v-model.trim="rule.url" type="url" required placeholder="http://127.0.0.1:9000/hook" />
-            </label>
             <label class="check"><input v-model="rule.enabled" type="checkbox" />启用此规则</label>
             <a-button type="primary" html-type="submit" :disabled="busy || !handlers.length">保存规则</a-button>
           </form>
@@ -336,11 +313,9 @@ onUnmounted(() => window.clearInterval(refreshTimer))
             <a-button :disabled="busy || !rule.keyword" @click="previewCurrentRule">试跑当前规则</a-button>
             <template v-if="monitoring?.mock_enabled">
               <a-button :disabled="busy || !sample.trim()" @click="submitMockMessage">投递模拟消息</a-button>
-              <p class="muted">模拟投递使用已保存的规则，会调用匹配的 HTTP 回调。</p>
             </template>
             <div v-if="preview" role="status">
               <p>{{ preview.matched ? '关键词命中' : '关键词未命中' }}</p>
-              <p v-if="preview.matched && preview.handler === 'webhook'">真实消息命中时将发送 HTTP 回调。试跑只检查匹配。</p>
               <pre v-if="preview.reply">{{ JSON.stringify(preview.reply, null, 2) }}</pre>
             </div>
           </details>
@@ -371,9 +346,6 @@ onUnmounted(() => window.clearInterval(refreshTimer))
         </li>
       </ul>
     </section>
-    <a-modal v-model:visible="confirmTest" title="发送测试消息" ok-text="确认发送" @ok="sendTest">
-      请先用手机打开「{{ phoneGroupName }}」聊天页并保持输入框为空。确认后会实际发送该群配置的测试回复。
-    </a-modal>
   </main>
 </template>
 

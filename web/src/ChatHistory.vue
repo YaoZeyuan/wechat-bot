@@ -217,7 +217,15 @@ onMounted(async () => {
               <small>{{ message.direction === 'out' ? '我' : message.sender.display_name || (selected.kind === 'private' ? selected.name : '未知发送者') }}
                 · {{ date(message.timestampMs) }}</small>
               <div class="bubble">
-                <a v-if="message.link" :href="message.link.url" target="_blank" rel="noopener noreferrer" class="shared-link">
+                <template v-if="message.kind === 'quote'">
+                  <div v-if="message.text">{{ message.text }}</div>
+                  <div v-for="(quote, index) in message.quotes" :key="index" class="quoted-message"
+                    :style="{ marginInlineStart: `${index * 12}px` }">
+                    <strong v-if="quote.sender">{{ quote.sender }}： </strong>{{ quote.text }}
+                  </div>
+                  <small v-if="!message.quotes?.length">[引用内容不可用]</small>
+                </template>
+                <a v-else-if="message.link" :href="message.link.url" target="_blank" rel="noopener noreferrer" class="shared-link">
                   <img v-if="message.link.cover" :src="message.link.cover" alt="" loading="lazy" referrerpolicy="no-referrer" />
                   <strong>{{ message.link.title || '网页链接' }}</strong>
                   <span v-if="message.link.description" class="link-description">{{ message.link.description }}</span>
@@ -284,6 +292,7 @@ small { color: var(--color-text-3); }
 .shared-link { display: grid; gap: 4px; }
 .shared-link img { width: 100%; max-height: 160px; object-fit: cover; border-radius: 4px; }
 .link-description { color: var(--color-text-2); }
+.quoted-message { margin-top: 6px; padding-left: 8px; border-left: 2px solid var(--color-text-3); font-size: 0.9em; }
 .empty-chat { margin: auto; padding: 16px; color: var(--color-text-3); }
 @media (max-width: 650px) {
   .workspace { grid-template-columns: 1fr; grid-template-rows: minmax(110px, 27%) minmax(0, 1fr); height: max(540px, calc(100dvh - 190px)); }

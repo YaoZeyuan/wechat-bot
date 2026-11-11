@@ -167,6 +167,37 @@ def sender_history(offset: int = 0, limit: int = 50):
              "status": json.loads(result)["status"]} for key, source, created, payload, result in rows]
 
 
+@router.get("/history/{request_id}/ai")
+def sender_history_ai(request_id: UUID):
+    key = str(request_id)
+    with closing(database()) as conn:
+        retained = conn.execute(
+            "SELECT 1 FROM sender_history WHERE job_id=? AND source='ai_chat'", (key,),
+        ).fetchone()
+    if not retained:
+        raise HTTPException(404, "AI 任务不存在")
+    events = {"ai_chat_request", "ai_chat_response", "ai_chat_http_error", "ai_chat_transport_error"}
+    fields = ("msg", "timestamp", "provider", "model", "url", "status", "elapsed_seconds",
+              "request_body", "response_body")
+    records = []
+    for name in ("server.log.3", "server.log.2", "server.log.1", "server.log"):
+        try:
+            with (root.parent / "logs" / name).open(encoding="utf-8", errors="replace") as log_file:
+                for line in log_file:
+                    if key not in line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except ValueError:
+                        continue
+                    if (entry.get("logger") == "wechat_bot.ai_chat"
+                            and entry.get("request_id") == key and entry.get("event") in events):
+                        records.append({field: entry[field] for field in fields if field in entry})
+        except FileNotFoundError:
+            continue
+    return records
+
+
 @router.get("/history/{request_id}/screens/{step}")
 def sender_history_screen(request_id: UUID, step: int):
     with closing(database()) as conn:
