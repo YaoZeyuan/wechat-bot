@@ -10,6 +10,7 @@ import AdminLayout from './AdminLayout.vue'
 import ChatHistory from './ChatHistory.vue'
 import PluginCatalog from './PluginCatalog.vue'
 import SenderHistory from './SenderHistory.vue'
+import WirelessDebug from './WirelessDebug.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -17,6 +18,7 @@ const router = createRouter({
     { path: '/', redirect: '/sender' },
     { path: '/sender', component: App },
     { path: '/sender-history', component: SenderHistory },
+    { path: '/wireless-debug', component: WirelessDebug },
     { path: '/setup', component: ReaderSetup },
     { path: '/history', component: ChatHistory },
     { path: '/rules', component: ReaderRules, beforeEnter: to =>

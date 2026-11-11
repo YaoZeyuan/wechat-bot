@@ -11,6 +11,11 @@ import type {
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
+export interface WirelessStatus {
+  device: { serial: string; state: string; model: string } | null
+  device_count: number
+}
+
 export interface Conversation {
   id: string
   name: string
@@ -149,6 +154,10 @@ export const api = {
   senderProgress: () => request<{ running: boolean; steps: string[] }>('/sender/progress'),
   senderStatus: () => request<{ connected: boolean }>('/sender/status'),
   restartAdb: () => request<{ connected: boolean }>('/sender/adb/restart', { method: 'POST' }),
+  pairWireless: (address: string, code: string) =>
+    request<WirelessStatus>('/sender/adb/pair', { method: 'POST', body: JSON.stringify({ address, code }) }),
+  connectWireless: (address: string) =>
+    request<WirelessStatus>('/sender/adb/connect', { method: 'POST', body: JSON.stringify({ address }) }),
   sendFromConsole: (payload: SendPayload) =>
     request<SendResult>('/sender/send', { method: 'POST', body: JSON.stringify(payload) }),
   pluginCatalog: () => request<(Omit<GroupPlugin, 'enabled'> & { default_enabled: boolean })[]>('/reader/plugins'),

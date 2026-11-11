@@ -34,6 +34,7 @@ const router = useRouter()
 const tabs = [
   { path: '/sender', label: 'Sender' },
   { path: '/sender-history', label: 'Sender 日志' },
+  { path: '/wireless-debug', label: '无线调试' },
   { path: '/setup', label: '微信初始化' },
   { path: '/history', label: '聊天记录' },
   { path: '/rules', label: '规则与任务' },

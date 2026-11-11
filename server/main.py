@@ -9,22 +9,24 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import json
+import re
 import shutil
 import sqlite3
 import subprocess
 import sys
-from time import perf_counter
+from time import perf_counter, sleep
 from uuid import uuid4
 from threading import Lock
 import structlog
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -141,7 +143,8 @@ def _devices() -> list[dict[str, str]]:
     for line in proc.stdout.splitlines()[1:]:
         parts = line.split()
         if len(parts) >= 2:
-            items.append({"serial": parts[0], "state": parts[1]})
+            metadata = dict(part.split(":", 1) for part in parts[2:] if ":" in part)
+            items.append({"serial": parts[0], "state": parts[1], "model": metadata.get("model", "")})
     return items
 
 
@@ -234,6 +237,114 @@ def send(req: SendRequest) -> dict[str, Any]:
 def sender_status() -> dict[str, bool]:
     with adb_status_lock:
         return {"connected": sum(item["state"] == "device" for item in _devices()) == 1}
+
+
+class WirelessEndpoint(BaseModel):
+    address: str = Field(max_length=64)
+
+    @field_validator("address")
+    @classmethod
+    def validate_address(cls, value: str) -> str:
+        host, _, port = value.strip().rpartition(":")
+        try:
+            ip = ip_address(host.removeprefix("[").removesuffix("]"))
+            if not re.fullmatch(r"[0-9]{1,5}", port) or not 1 <= int(port) <= 65535:
+                raise ValueError
+        except ValueError:
+            raise ValueError("请输入手机显示的 IP 地址和端口") from None
+        return f"[{ip}]:{int(port)}" if ip.version == 6 else f"{ip}:{int(port)}"
+
+
+class WirelessPair(WirelessEndpoint):
+    code: SecretStr
+
+
+def wireless_device_status(address: str, service: str = "") -> dict:
+    devices = [item for item in _devices() if item["state"] == "device"]
+    device = next((item for item in devices if item["serial"] == address
+                   or (service and item["serial"] == f"{service}._adb-tls-connect._tcp")), None)
+    return {"device": device, "device_count": len(devices)}
+
+
+def discover_wireless_device(adb: str, pair_address: str) -> dict:
+    host = pair_address.rpartition(":")[0]
+    for attempt in range(4):
+        if attempt:
+            sleep(0.5)
+        try:
+            result = subprocess.run(
+                [adb, "mdns", "services"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=2,
+            )
+            matches = []
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if (len(parts) == 3 and parts[1].rstrip(".") == "_adb-tls-connect._tcp"
+                        and parts[2].rpartition(":")[0] == host):
+                    matches.append((parts[0], parts[2]))
+            if len(matches) != 1:
+                continue
+            service, address = matches[0]
+            status = wireless_device_status(address, service)
+            if status["device"]:
+                return status
+            subprocess.run([adb, "connect", address], capture_output=True, timeout=5)
+            status = wireless_device_status(address, service)
+            if status["device"]:
+                return status
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return {"device": None, "device_count": 0}
+
+
+def wireless_adb(command: str, address: str, code: str | None = None) -> dict:
+    if not sender_console_lock.acquire(blocking=False):
+        raise HTTPException(409, "正在执行手机操作，请稍后重试")
+    try:
+        with adb_status_lock:
+            setup_adb(load_config())
+            adb = shutil.which("adb")
+            if not adb:
+                raise HTTPException(503, "找不到 ADB，请检查本机 ADB 路径配置")
+            try:
+                proc = subprocess.run(
+                    [adb, command, address], input=code + "\n" if code else "",
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
+                )
+            except subprocess.TimeoutExpired:
+                sender_log.warning("adb_wireless_timeout", msg="无线调试操作超时", command=command)
+                raise HTTPException(504, "ADB 操作超时，请确认手机与电脑在同一网络，且端口仍有效") from None
+            except OSError:
+                raise HTTPException(503, "无法启动 ADB，请检查 Server 的 ADB 配置") from None
+            output = proc.stdout.lower()
+            if command == "pair":
+                ok = "successfully paired" in output
+                failure = "配对失败，请在手机重新打开配对弹窗，核对配对端口和六位配对码"
+            else:
+                ok = any(line.startswith(("connected to ", "already connected to ")) for line in output.splitlines())
+                failure = "连接失败，请核对无线调试主页面的连接端口，并确认手机已配对"
+            ok = proc.returncode == 0 and ok
+            sender_log.info("adb_wireless_result", msg="无线调试操作完成", command=command, ok=ok)
+            if not ok:
+                raise HTTPException(502, failure)
+            if command == "pair":
+                return discover_wireless_device(adb, address)
+            return wireless_device_status(address)
+    finally:
+        sender_console_lock.release()
+
+
+@app.post("/api/sender/adb/pair")
+def pair_wireless(req: WirelessPair):
+    code = req.code.get_secret_value()
+    if not re.fullmatch(r"[0-9]{6}", code):
+        raise HTTPException(422, "配对码应为六位数字")
+    return wireless_adb("pair", req.address, code)
+
+
+@app.post("/api/sender/adb/connect")
+def connect_wireless(req: WirelessEndpoint):
+    return wireless_adb("connect", req.address)
 
 
 @app.post("/api/sender/adb/restart")
