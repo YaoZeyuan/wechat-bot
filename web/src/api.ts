@@ -107,9 +107,20 @@ interface SenderJobResult {
   status: string
   steps: string[]
   items: string[]
+  screens?: number[]
+}
+
+export interface SenderHistoryItem {
+  id: string
+  source: string
+  created_ms: number | null
+  target: { name: string }
+  status: string
 }
 
 export const api = {
+  senderHistory: (offset = 0) => request<SenderHistoryItem[]>(`/sender/history?offset=${offset}`),
+  senderHistoryScreen: (id: string, step: number) => `${BASE}/sender/history/${id}/screens/${step}`,
   async senderScreen() {
     const response = await fetch(`${BASE}/sender/screen`, { cache: 'no-store' })
     if (!response.ok) {
@@ -182,6 +193,8 @@ export const api = {
   setReaderStatus: (enabled: boolean, interval_seconds?: number) =>
     request<ReaderStatus>('/reader/status', { method: 'PUT', body: JSON.stringify({ enabled, interval_seconds }) }),
   readerRules: () => request<{ items: KeywordRule[]; handlers: string[] }>('/reader/rules'),
+  deleteReaderRule: (group_id: string, keyword: string) =>
+    request<{ ok: boolean }>(`/reader/rules?${new URLSearchParams({ group_id, keyword })}`, { method: 'DELETE' }),
   saveReaderRule: (rule: KeywordRule) =>
     request<KeywordRule>('/reader/rules', { method: 'PUT', body: JSON.stringify(rule) }),
   previewReaderRule: (rule: KeywordRule, text: string) =>

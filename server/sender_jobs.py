@@ -1,5 +1,6 @@
 """Versioned phone tasks and their durable results."""
 import json
+import shutil
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field
 router = APIRouter(prefix="/api/sender")
 root = Path(__file__).resolve().parents[1] / "local-data" / "sender"
 MAX_ASSET = 20 * 1024 * 1024
+HISTORY_LIMIT = 1000
 
 
 class Target(BaseModel):
@@ -43,16 +45,24 @@ def database():
     root.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(root / "jobs.sqlite")
     conn.execute("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, payload TEXT, result TEXT)")
+    conn.execute("CREATE TABLE IF NOT EXISTS sender_history (job_id TEXT PRIMARY KEY, source TEXT, created_ms INTEGER)")
     return conn
 
 
 def recover_jobs():
     with closing(database()) as conn, conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO sender_history SELECT id, '历史任务', NULL FROM "
+            "(SELECT id, rowid FROM jobs ORDER BY rowid DESC LIMIT ?) "
+            "WHERE NOT EXISTS (SELECT 1 FROM sender_history) ORDER BY rowid",
+            (HISTORY_LIMIT,),
+        )
         for key, raw in conn.execute("SELECT id, result FROM jobs WHERE json_extract(result, '$.status') IN ('queued', 'running')"):
             result = json.loads(raw)
             result["status"] = "uncertain" if result["status"] == "running" else "failed"
             result["steps"].append("服务已重启，任务中断。请先在手机核对发送结果")
             conn.execute("UPDATE jobs SET result = ? WHERE id = ?", (json.dumps(result), key))
+    trim_history()
 
 def save(key, result):
     with closing(database()) as conn, conn:
@@ -111,7 +121,7 @@ def submit(job: Job, tasks: BackgroundTasks):
     return result
 
 
-def queue_job(job: Job, *, strict=True):
+def queue_job(job: Job, *, strict=True, source="manual"):
     key = str(job.request_id)
     payload = job.model_dump_json()
     result = {"request_id": key, "status": "queued", "steps": [], "items": ["pending"] * len(job.messages)}
@@ -122,7 +132,55 @@ def queue_job(job: Job, *, strict=True):
             if strict and Job.model_validate_json(stored) != job:
                 raise HTTPException(409, "任务 ID 已用于另一份请求")
             return json.loads(previous), False
+        conn.execute("INSERT INTO sender_history VALUES (?, ?, ?)", (key, source, int(time() * 1000)))
     return result, True
+
+
+@router.get("/history")
+def sender_history(offset: int = 0, limit: int = 50):
+    if not 0 <= offset < HISTORY_LIMIT or not 1 <= limit <= 100:
+        raise HTTPException(422, "日志分页参数无效")
+    with closing(database()) as conn:
+        rows = conn.execute(
+            "SELECT h.job_id, h.source, h.created_ms, j.payload, j.result FROM sender_history h "
+            "JOIN jobs j ON j.id=h.job_id ORDER BY h.rowid DESC LIMIT ? OFFSET ?",
+            (min(limit, HISTORY_LIMIT - offset), offset),
+        ).fetchall()
+    return [{"id": key, "source": source, "created_ms": created, "target": json.loads(payload)["target"],
+             "status": json.loads(result)["status"]} for key, source, created, payload, result in rows]
+
+
+@router.get("/history/{request_id}/screens/{step}")
+def sender_history_screen(request_id: UUID, step: int):
+    with closing(database()) as conn:
+        retained = conn.execute("SELECT 1 FROM sender_history WHERE job_id=?", (str(request_id),)).fetchone()
+    path = root / "screens" / str(request_id) / f"{step}.png"
+    if not retained:
+        raise HTTPException(404, "截图不存在")
+    try:
+        image = path.read_bytes()
+    except FileNotFoundError:
+        raise HTTPException(404, "截图不存在") from None
+    return Response(image, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+def trim_history():
+    with closing(database()) as conn, conn:
+        removed = conn.execute(
+            "DELETE FROM sender_history WHERE rowid IN (SELECT h.rowid FROM sender_history h "
+            "JOIN jobs j ON j.id=h.job_id "
+            "WHERE h.rowid NOT IN (SELECT rowid FROM sender_history ORDER BY rowid DESC LIMIT ?) "
+            "AND json_extract(j.result, '$.status') NOT IN ('queued', 'running')) RETURNING job_id",
+            (HISTORY_LIMIT,),
+        ).fetchall()
+        for (key,) in removed:
+            row = conn.execute("SELECT result FROM jobs WHERE id=?", (key,)).fetchone()
+            result = json.loads(row[0])
+            result.pop("screens", None)
+            result["steps"] = []
+            conn.execute("UPDATE jobs SET result=? WHERE id=?", (json.dumps(result), key))
+    for (key,) in removed:
+        shutil.rmtree(root / "screens" / key, ignore_errors=True)
 
 
 @router.get("/jobs/{request_id}")
@@ -162,9 +220,23 @@ def run(job, result):
     from server.main import _devices, create_sender, sender_console_lock, sender_log
 
     key = str(job.request_id)
+    serial = None
 
     def progress(message):
         result["steps"].append(message)
+        if serial:
+            try:
+                from adbutils import adb
+
+                image = adb.device(serial).shell(["screencap", "-p"], encoding=None, timeout=3)
+                if image.startswith(b"\x89PNG\r\n\x1a\n"):
+                    step = len(result["steps"]) - 1
+                    folder = root / "screens" / key
+                    folder.mkdir(parents=True, exist_ok=True)
+                    (folder / f"{step}.png").write_bytes(image)
+                    result.setdefault("screens", []).append(step)
+            except Exception as exc:
+                sender_log.warning("sender_step_screen_failed", request_id=key, error=type(exc).__name__)
         save(key, result)
         sender_log.info("sender_job_step", request_id=key, msg=message)
 
@@ -191,7 +263,8 @@ def run(job, result):
             ready = [item for item in _devices() if item["state"] == "device"]
             if len(ready) != 1:
                 raise ValueError("请连接并授权一台手机")
-            phone = create_sender(serial=ready[0]["serial"], dry_run=job.mode == "dry_run")
+            serial = ready[0]["serial"]
+            phone = create_sender(serial=serial, dry_run=job.mode == "dry_run")
             if assets and not hasattr(phone, "send_asset"):
                 raise ValueError("附件发送需要手机无障碍通道")
             phone.on_progress = progress
@@ -199,16 +272,19 @@ def run(job, result):
 
             for index, item in enumerate(job.messages):
                 progress(f"处理第 {index + 1} 条消息")
+                if hasattr(phone, "prepare_device"):
+                    phone.prepare_device()
                 sending = job.mode == "send"
                 if isinstance(item, TextMessage):
                     started_ms = int(time() * 1000)
                     sending = False
                     try:
                         phone.prepare_chat(target)
-                    except SendError:
+                    except SendError as exc:
                         if not hasattr(phone, "share_text"):
                             raise
-                        progress("会话内定位未通过，改用微信分享确认收件人")
+                        progress(f"会话内定位未通过（{exc}），重新打开微信后尝试分享")
+                        phone.prepare_device()
                         sending = job.mode == "send"
                         ok = phone.share_text(target, item.text, group=job.target.kind == "group")
                     else:
@@ -236,3 +312,7 @@ def run(job, result):
         finally:
             if phone is not None and getattr(phone, "conn", None) is not None:
                 phone.conn.close()
+            try:
+                trim_history()
+            except (OSError, sqlite3.Error):
+                sender_log.exception("sender_history_cleanup_failed", request_id=key)

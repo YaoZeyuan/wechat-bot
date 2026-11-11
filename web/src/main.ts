@@ -9,12 +9,14 @@ import ReaderRules from './ReaderRules.vue'
 import AdminLayout from './AdminLayout.vue'
 import ChatHistory from './ChatHistory.vue'
 import PluginCatalog from './PluginCatalog.vue'
+import SenderHistory from './SenderHistory.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/sender' },
     { path: '/sender', component: App },
+    { path: '/sender-history', component: SenderHistory },
     { path: '/setup', component: ReaderSetup },
     { path: '/history', component: ChatHistory },
     { path: '/rules', component: ReaderRules, beforeEnter: to =>

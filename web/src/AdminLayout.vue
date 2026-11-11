@@ -1,10 +1,39 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { api } from './api'
+
+const connected = ref<boolean | null>(null)
+let timer: number | undefined
+let checking = false
+
+async function refreshPhoneStatus() {
+  if (document.hidden || checking) return
+  checking = true
+  try {
+    connected.value = (await api.senderStatus()).connected
+  } catch {
+    connected.value = null
+  } finally {
+    checking = false
+  }
+}
+
+onMounted(() => {
+  void refreshPhoneStatus()
+  timer = window.setInterval(refreshPhoneStatus, 5000)
+  document.addEventListener('visibilitychange', refreshPhoneStatus)
+})
+onUnmounted(() => {
+  window.clearInterval(timer)
+  document.removeEventListener('visibilitychange', refreshPhoneStatus)
+})
 
 const route = useRoute()
 const router = useRouter()
 const tabs = [
   { path: '/sender', label: 'Sender' },
+  { path: '/sender-history', label: 'Sender 日志' },
   { path: '/setup', label: '微信初始化' },
   { path: '/history', label: '聊天记录' },
   { path: '/rules', label: '规则与任务' },
@@ -24,7 +53,9 @@ function navigate(path: string | number) {
         <span class="admin-mark" aria-hidden="true">W</span>
         <div><strong>wechat-bot</strong><small>本地管理后台</small></div>
       </div>
-      <a-tag color="arcoblue">本机工作区</a-tag>
+      <a-tag :color="connected === true ? 'green' : connected === false ? 'orange' : 'gray'" role="status">
+        {{ connected === true ? '手机已连接' : connected === false ? '手机不可用' : '手机状态待确认' }}
+      </a-tag>
     </a-layout-header>
     <nav aria-label="后台导航" class="admin-navigation">
       <a-tabs :active-key="route.path" type="line" @change="navigate">

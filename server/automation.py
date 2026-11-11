@@ -172,6 +172,12 @@ class Automation:
                 (rule.group_id, rule.keyword, rule.model_dump_json()),
             )
 
+    def delete_rule(self, group_id: str, keyword: str) -> bool:
+        with self.database() as db:
+            return db.execute(
+                "DELETE FROM rules WHERE group_id=? AND keyword=?", (group_id, keyword),
+            ).rowcount > 0
+
     def rules(self) -> list[Rule]:
         with self.database() as db:
             return [Rule.model_validate_json(row["config"]) for row in db.execute(

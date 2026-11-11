@@ -127,6 +127,18 @@ function save() {
   })
 }
 
+function deleteRule(item: KeywordRule) {
+  if (!window.confirm(`删除触发规则「${item.keyword}」？`)) return
+  return run(async () => {
+    await api.deleteReaderRule(item.group_id, item.keyword)
+    rules.value = rules.value.filter(rule => rule.group_id !== item.group_id || rule.keyword !== item.keyword)
+    if (editing.value && rule.value.group_id === item.group_id && rule.value.keyword === item.keyword) {
+      selectGroup(item.group_id)
+    }
+    notice.value = '规则已删除。'
+  })
+}
+
 function previewCurrentRule() {
   preview.value = undefined
   return run(async () => {
@@ -293,6 +305,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
               <a-tag v-if="item.enabled && plugins.some(plugin => plugin.id === item.handler && !plugin.enabled)" color="gray">插件停用</a-tag>
               <a-tag v-else :color="item.enabled ? 'green' : 'gray'">{{ item.enabled ? '启用' : '停用' }}</a-tag>
               <a-button size="small" :disabled="busy" @click="editRule(item)">编辑</a-button>
+              <a-button size="small" status="danger" :disabled="busy" @click="deleteRule(item)">删除</a-button>
             </li>
           </ul>
           <p v-else class="muted">此群还没有规则，可以在下方添加。</p>

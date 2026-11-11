@@ -156,6 +156,14 @@ def save_rule(rule: Rule) -> Rule:
     return rule
 
 
+@router.delete("/rules")
+def delete_rule(group_id: str = Query(min_length=1), keyword: str = Query(min_length=1)) -> dict:
+    if not automation.delete_rule(group_id, keyword):
+        raise HTTPException(404, "触发规则不存在")
+    log.info("desktop_group_rule_deleted", group_id=group_id)
+    return {"ok": True}
+
+
 class RulePreview(BaseModel):
     rule: Rule
     text: str = Field(max_length=4000)

@@ -120,6 +120,20 @@ class SqlCipherReader:
             "original_name": row["nick_name"] or "", "remark": row["remark"] or "",
         } for row in rows}
 
+    def group_members(self, group_id: str) -> set[str]:
+        with self.open(self.root / "contact" / "contact.db") as db:
+            if not db.execute("SELECT 1 FROM chat_room WHERE username=?", (group_id,)).fetchone():
+                raise SourceError("本地数据库中没有该群的当前成员名单")
+            rows = db.execute("""
+                SELECT c.username
+                FROM chat_room r JOIN chatroom_member m ON m.room_id = r.id
+                LEFT JOIN contact c ON c.id = m.member_id
+                WHERE r.username = ?
+            """, (group_id,)).fetchall()
+        if not rows or any(not row["username"] for row in rows):
+            raise SourceError("本地数据库中的当前群成员名单不完整")
+        return {row["username"] for row in rows}
+
     def group_nicknames(self, group_id: str) -> dict[str, str]:
         with self.open(self.root / "contact" / "contact.db") as db:
             if not db.execute("SELECT 1 FROM sqlite_master WHERE name='chat_room'").fetchone():
@@ -197,6 +211,10 @@ class SqlCipherReader:
         return {"items": items, "has_more": has_more}
 
     def messages(self, session_id: str, *, offset=0, limit=1, **filters):
+        with closing(self.iter_messages(session_id, limit=offset + limit)) as rows:
+            return {"items": list(islice(rows, offset, offset + limit))}
+
+    def iter_messages(self, session_id: str, *, limit=-1):
         table = "Msg_" + hashlib.md5(session_id.encode(), usedforsecurity=False).hexdigest()
         shards = sorted((self.root / "message").glob("message_*.db"))
         shards = [path for path in shards if re.fullmatch(r"message_\d+\.db", path.name)]
@@ -217,12 +235,13 @@ class SqlCipherReader:
                            m.message_content, n.user_name
                     FROM "{table}" AS m LEFT JOIN Name2Id AS n ON n.rowid=m.real_sender_id
                     ORDER BY m.sort_seq DESC, m.local_id DESC LIMIT ?
-                """, (offset + limit,))
+                """, (limit,))
                 streams.append(tagged_rows(cursor, path.stem))
             merged = heapq.merge(
                 *streams, key=lambda pair: (pair[0]["sort_seq"], pair[0]["local_id"], pair[1]), reverse=True,
             )
-            return {"items": [self.message(row, shard) for row, shard in islice(merged, offset, offset + limit)]}
+            for row, shard in merged:
+                yield self.message(row, shard)
 
     def message(self, row, shard):
         sender = row["user_name"]

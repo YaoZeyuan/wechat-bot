@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
+import time
 
 from .base import SendError
 from .config import setup_adb
@@ -36,6 +38,44 @@ class AccessibilitySender:
         if not result["nodes"] and "root_package" in result:
             package = result["root_package"] or "无根节点"
             self.progress(f"无障碍诊断：根节点 {package}，直接子节点 {result['root_children']} 个，边界 {result['root_bounds']}")
+
+    def prepare_device(self):
+        power = self.device.shell(["dumpsys", "power"], timeout=5)
+        if not re.search(r"\bmWakefulness=Awake\b", power):
+            self.progress("手机已息屏，正在通过 ADB 唤醒")
+            self.device.shell(["input", "keyevent", "KEYCODE_WAKEUP"], timeout=5)
+        self.device.shell(["wm", "dismiss-keyguard"], timeout=5)
+
+        key = "enabled_accessibility_services"
+        talkback = "com.google.android.marvin.talkback/.TalkBackService"
+        enabled = self.device.shell(["settings", "get", "secure", key], timeout=5).strip()
+        services = [] if enabled in {"", "null"} else enabled.split(":")
+        full_component = "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService"
+        if talkback not in services and full_component not in services:
+            self.progress("TalkBack 未开启，正在启用")
+            self.device.shell(["settings", "put", "secure", key, ":".join([*services, talkback])], timeout=5)
+
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            status = self.device.shell(["dumpsys", "accessibility"], timeout=5)
+            if "Service[label=TalkBack," in status:
+                break
+            time.sleep(0.5)
+        else:
+            raise SendError("TalkBack 未能启动，请检查手机无障碍设置")
+
+        active = self.foreground()
+        if not active or active.group(2) != "com.tencent.mm":
+            self.progress("正在打开手机微信")
+            self.device.shell(["am", "start", "-W", "-n", "com.tencent.mm/.ui.LauncherUI"], timeout=12)
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            active = self.foreground()
+            if active and active.group(2) == "com.tencent.mm" and self.call("status")["nodes"] > 0:
+                self.progress("手机已亮屏，TalkBack 正在运行，微信控件可读")
+                return
+            time.sleep(0.5)
+        raise SendError("手机准备未完成，请检查锁屏或挡住微信的系统弹窗")
 
     def call(self, action, **payload):
         endpoint = "localabstract:wechat_sender"
@@ -132,15 +172,13 @@ class AccessibilitySender:
                 self.progress("手机端临时分享文件清理失败")
 
     def foreground(self):
-        import re
-
         windows = self.device.shell(["dumpsys", "window"], timeout=5)
         return re.search(r"mCurrentFocus=Window\{[^\r\n]*\bu(\d+) ([\w.]+)/([^}\s]+)", windows)
 
     def share_user(self):
         active = self.foreground()
         if active is None or active.group(2) != "com.tencent.mm":
-            raise SendError("请先将目标微信打开到前台")
+            raise ShareRejected("请先将目标微信打开到前台")
         return active.group(1)
 
     def share_text(self, target, text, *, group=False):
@@ -171,7 +209,7 @@ class AccessibilitySender:
                 prompted = True
             time.sleep(1)
         else:
-            raise SendError("等待微信分享页面超时，未发送消息")
+            raise ShareRejected("等待微信分享页面超时，未发送消息")
 
         self.progress("正在核对微信分享确认页上的收件人和内容")
         try:
