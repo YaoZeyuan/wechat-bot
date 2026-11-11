@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "providers": {
+    "deepseek": {
+      "base_url": "https://api.deepseek.com",
+      "api_key": "",
+      "models": {
+        "default": {
+          "id": "deepseek-flash",
+          "thinking": "disabled"
+        }
+      },
+      "timeout_seconds": 20
+    },
+    "doubao": {
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "api_key": "",
+      "models": {
+        "default": {
+          "id": "",
+          "thinking": "disabled"
+        }
+      },
+      "timeout_seconds": 20
+    }
+  },
+  "routes": {
+    "deepseek": {
+      "provider": "deepseek",
+      "model": "default",
+      "prefixes": [
+        "ds",
+        "deepseek",
+        "大肥鱼"
+      ]
+    },
+    "doubao": {
+      "provider": "doubao",
+      "model": "default",
+      "prefixes": [
+        "豆包",
+        "doubao",
+        "包姐"
+      ]
+    }
+  },
+  "reply_prefix": "【统一前缀】我正在微信群内聊天，想向你询问以下问题，请简短回复，控制在300字以内。\n"
+}

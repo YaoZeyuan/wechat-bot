@@ -112,6 +112,22 @@ const form = ref({
 
 const apiOnline = computed(() => health.value?.ok === true)
 const deviceText = computed(() => deviceReady.value === null ? '待确认' : deviceReady.value ? '已连接' : '不可用')
+const restartingAdb = ref(false)
+const adbNotice = ref('')
+
+async function restartAdb() {
+  restartingAdb.value = true
+  adbNotice.value = ''
+  try {
+    const { connected } = await api.restartAdb()
+    deviceReady.value = connected
+    adbNotice.value = connected ? 'ADB 已重启，手机已连接。' : 'ADB 已重启，请确认只连接了一台已授权的手机。'
+  } catch (cause) {
+    adbNotice.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    restartingAdb.value = false
+  }
+}
 
 async function refreshDevice() {
   if (checkingDevice) return
@@ -315,12 +331,16 @@ onUnmounted(() => {
           仅演练（填入输入框但不点击发送）
         </label>
         <div class="row">
-          <button class="primary" :disabled="busy || deviceReady !== true || (kind !== 'file_helper' && (!target.trim() || !targetId.trim())) || (!text.trim() && !attachments.length)" @click="doSend">
+          <button class="primary" :disabled="busy || restartingAdb || deviceReady !== true || (kind !== 'file_helper' && (!target.trim() || !targetId.trim())) || (!text.trim() && !attachments.length)" @click="doSend">
             {{ busy ? '处理中…' : dryRun ? '演练发送' : '实际发送' }}
           </button>
-          <button class="ghost" :disabled="busy" @click="refresh">刷新状态</button>
+          <button class="ghost" :disabled="busy || restartingAdb" @click="refresh">刷新状态</button>
+          <button class="ghost" type="button" :disabled="busy || restartingAdb" @click="restartAdb">
+            {{ restartingAdb ? '正在重启 ADB…' : '重启 ADB' }}
+          </button>
         </div>
-        <p v-if="deviceReady === false" class="hint">请连接并授权一台手机，再刷新状态。</p>
+        <p v-if="adbNotice" class="hint" role="status">{{ adbNotice }}</p>
+        <p v-else-if="deviceReady === false" class="hint">请连接并授权一台手机，再刷新状态。</p>
         <h3 v-if="steps.length">发送过程</h3>
         <ol v-if="steps.length" aria-live="polite">
           <li v-for="(step, index) in steps" :key="index">{{ step }}</li>

@@ -9,6 +9,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 from pydantic import HttpUrl
 
 from .ciphertalk import NoRedirect
+from .plugin import ai_chat
 from .reply import MessageEvent, Reply, Text
 
 log = structlog.get_logger("wechat_bot.plugins")
@@ -39,6 +40,7 @@ HANDLERS: dict[str, Callable[[MessageEvent], Reply | None]] = {
 
 # Stable plugin IDs are shared by rules, the catalog and group overrides.
 PLUGINS = {
+    ai_chat.PLUGIN_ID: ai_chat.METADATA,
     "open_baidu": {"name": "打开百度", "description": "收到配置的关键词后，在电脑默认浏览器打开百度", "default_enabled": False, "version": "1.0.0", "capability": "浏览器"},
     "fixed_reply": {"name": "测试", "description": "文本与配置关键词完全一致时，发送指定回复", "default_enabled": True, "version": "1.0.0", "capability": "手机发送"},
     "daily_activity": {"name": "活跃日榜", "description": "统计北京时间当天本群发言数，回复前十名", "default_enabled": False, "version": "1.0.0", "capability": "手机发送"},

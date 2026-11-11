@@ -77,19 +77,19 @@ uv run python check_env.py
 # 终端 1：API 服务，监听 127.0.0.1:8000
 uv run dev-server
 
-# 终端 2：前端，默认 http://127.0.0.1:3000
+# 终端 2：前端，默认 http://127.0.0.1:8133
 uv run dev-web
 ```
 
-前端通过 Vite 代理把 `/api` 转发到 8000。Windows 上 `5101–5200` 可能被系统保留为动态端口（Hyper-V / WSL），所以前端默认用 3000；如被占用改 `web/vite.config.ts` 的 `port`。
+前端通过 Vite 代理把 `/api` 转发到 8000。Windows 上 `5101–5200` 可能被系统保留为动态端口（Hyper-V / WSL），所以前端默认用 8133；如被占用改 `web/vite.config.ts` 的 `port`。
 
 ### 从零搭建并验收
 
 1. 在独立测试机登录测试微信，开启开发者选项、USB 调试和 USB 安装。用数据线连接 Windows 电脑，在手机上允许 USB 调试，并运行 `adb devices` 确认状态为 `device`。
 2. 在 Android Studio 打开 `android-sender`，构建 `assembleDebug`，安装 `android-sender/build/outputs/apk/debug/` 里的调试 APK。在手机的无障碍设置启用 **WeChat Sender**。若微信控件树为空，可按下文的 TalkBack 兼容说明配置测试机。
-3. 在项目根目录生成 `config.json`，设定 `"sender_channel": "accessibility"`。如果 ADB 未加入 PATH，填入 `adb_dir`。启动上面的 Server 和 Web，在 [Sender 页](http://127.0.0.1:3000/sender) 选择文件传输助手，先勾选「仅演练」，再实际发送一条短文字并在微信里核对。
-4. 在 Windows 微信登录待读取的测试账号，进入 [微信初始化](http://127.0.0.1:3000/setup)，选择账号和数据库目录，填入已有数据库密钥并验证保存。在「聊天记录」打开目标群，点击「启用机器人」，再到「规则与任务」启动监听。
-5. 到群配置页启用要验收的插件，让另一账号在测试群发送完整关键词。在群内核对回复，失败时到 [Sender 日志](http://127.0.0.1:3000/sender-history) 查看操作步骤和可用截图。
+3. 在项目根目录生成 `config.json`，设定 `"sender_channel": "accessibility"`。如果 ADB 未加入 PATH，填入 `adb_dir`。启动上面的 Server 和 Web，在 [Sender 页](http://127.0.0.1:8133/sender) 选择文件传输助手，先勾选「仅演练」，再实际发送一条短文字并在微信里核对。
+4. 在 Windows 微信登录待读取的测试账号，进入 [微信初始化](http://127.0.0.1:8133/setup)，选择账号和数据库目录，填入已有数据库密钥并验证保存。在「聊天记录」打开目标群，点击「启用机器人」，再到「规则与任务」启动监听。
+5. 到群配置页启用要验收的插件，让另一账号在测试群发送完整关键词。在群内核对回复，失败时到 [Sender 日志](http://127.0.0.1:8133/sender-history) 查看操作步骤和可用截图。
 
 ## 配置说明
 
@@ -190,9 +190,11 @@ uv run dev-web
 uv run dev-sender --help
 ```
 
-前两个命令分别启动 API（8000）和 Web（3000）。发送器是按次执行的 CLI，例如 `uv run dev-sender --devices`。读取本地数据库无需开启 Mock。
+前两个命令分别启动 API（8000）和 Web（8133）。发送器是按次执行的 CLI，例如 `uv run dev-sender --devices`。读取本地数据库无需开启 Mock。
 
 「Sender」标签（`/sender`）显示是否有且仅有一台已授权的手机。让手机微信停在首页，填写完整的联系人或群聊名称和文本。默认显示「实际发送」，需要验证定位时手动勾选「仅演练」，由后端调度 sender。
+
+Sender 的 JSON 任务中，单条 `text` 超过 500 字会按顺序分段发送。每段优先在第 400 字之后、第 500 字以内的第一个换行处切分，找不到换行时在第 500 字切分。各段加上 `(1/3)` 形式的序号，最多发送 5 段，剩余内容以 `……(此处略去x字)` 标注。图片和文件按原协议发送。
 
 `uv run dev-server` 默认监控 `server/` 和 `sender/` 中的 Python 文件并自动重启 API。需要关闭热重载时使用 `uv run dev-server --no-reload`。
 
@@ -213,6 +215,16 @@ Windows 手动取钥需要在后端启用 `WECHAT_BOT_KEY_EXTRACTION=1`，并提
 ```sh
 uv run python -m server.export_history --snapshot local-data/snapshot --account wxid_example --group "群名" --output local-data/history.jsonl
 ```
+
+## AI 问答插件
+
+把 [plugins/ai_chat/config.example.json](plugins/ai_chat/config.example.json) 复制到 `plugins/ai_chat/config.json`，在本地填入两个服务商的 API Key。火山方舟的 `models.default.id` 填写账号已开通的模型 ID。可在每个服务商的 `models` 下添加多个别名，再在 `routes` 里选择对应的服务商和模型别名。服务端每次触发时读取配置，修改后即可生效。真实配置已由 Git 忽略。
+
+模型默认关闭深度思考。可在模型别名下设置 `"thinking": "disabled"`，使用 `"enabled"` 开启，或用 `null` 让服务商采用自身默认值。旧版字符串形式的模型 ID 也默认关闭思考。
+
+配置顶层的 `reply_prefix` 会原样拼在发给两个模型的用户消息正文前。需要换行分隔时，在配置值末尾加 `\n`。默认为空。
+
+在目标群的配置页启用「AI 问答」。DeepSeek 的触发前缀为 `ds`、`deepseek`、`大肥鱼`，豆包为 `豆包`、`doubao`、`包姐`。可在本地配置的 `routes.<路由名>.prefixes` 修改，英文大小写均可。插件把 `reply_prefix` 和触发词后的正文拼成单轮问题，使用 Sender 将模型回答和耗时发回原群。
 
 ## 参考项目与致谢
 

@@ -33,8 +33,8 @@ def main():
 
 
 def web_main():
-    parser = argparse.ArgumentParser(description="Start the Vite development server on port 3000.")
-    parser.add_argument("--port", type=int, default=3000)
+    parser = argparse.ArgumentParser(description="Start the Vite development server on port 8133.")
+    parser.add_argument("--port", type=int, default=8133)
     args = parser.parse_args()
     pnpm = shutil.which("pnpm.exe") if os.name == "nt" else None
     pnpm = pnpm or shutil.which("pnpm.cmd" if os.name == "nt" else "pnpm")

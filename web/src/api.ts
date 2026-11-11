@@ -136,6 +136,7 @@ export const api = {
   senderJob: (id: string) => request<SenderJobResult>(`/sender/jobs/${id}`),
   senderProgress: () => request<{ running: boolean; steps: string[] }>('/sender/progress'),
   senderStatus: () => request<{ connected: boolean }>('/sender/status'),
+  restartAdb: () => request<{ connected: boolean }>('/sender/adb/restart', { method: 'POST' }),
   sendFromConsole: (payload: SendPayload) =>
     request<SendResult>('/sender/send', { method: 'POST', body: JSON.stringify(payload) }),
   pluginCatalog: () => request<(Omit<GroupPlugin, 'enabled'> & { default_enabled: boolean })[]>('/reader/plugins'),

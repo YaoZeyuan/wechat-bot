@@ -25,7 +25,24 @@ class Target(BaseModel):
 
 class TextMessage(BaseModel):
     type: Literal["text"]
-    text: str = Field(min_length=1, max_length=1800)
+    text: str = Field(min_length=1, max_length=256 * 1024)
+
+
+def split_text(text: str) -> list[str]:
+    if len(text) <= 500:
+        return [text]
+    parts = []
+    while len(text) > 500 and len(parts) < 5:
+        newline = text.find("\n", 400, 500)
+        end = newline + 1 if newline >= 0 else 500
+        parts.append(text[:end])
+        text = text[end:]
+    if text:
+        if len(parts) == 5:
+            parts[-1] = f"{parts[-1]}……(此处略去{len(text)}字)"
+        else:
+            parts.append(text)
+    return [f"({index}/{len(parts)}){part}" for index, part in enumerate(parts, 1)]
 
 
 class AssetMessage(BaseModel):
@@ -276,22 +293,29 @@ def run(job, result):
                     phone.prepare_device()
                 sending = job.mode == "send"
                 if isinstance(item, TextMessage):
-                    started_ms = int(time() * 1000)
-                    sending = False
-                    try:
-                        phone.prepare_chat(target)
-                    except SendError as exc:
-                        if not hasattr(phone, "share_text"):
-                            raise
-                        progress(f"会话内定位未通过（{exc}），重新打开微信后尝试分享")
-                        phone.prepare_device()
-                        sending = job.mode == "send"
-                        ok = phone.share_text(target, item.text, group=job.target.kind == "group")
-                    else:
-                        sending = job.mode == "send"
-                        ok = phone.send(target, item.text, current_chat=True)
-                    if sending:
-                        result.setdefault("text_sends", []).append([index, started_ms, int(time() * 1000)])
+                    parts = split_text(item.text)
+                    for part_index, part in enumerate(parts, 1):
+                        if len(parts) > 1:
+                            progress(f"发送文字第 {part_index}/{len(parts)} 段")
+                        started_ms = int(time() * 1000)
+                        sending = False
+                        try:
+                            phone.prepare_chat(target)
+                        except SendError as exc:
+                            if not hasattr(phone, "share_text"):
+                                raise
+                            progress(f"会话内定位未通过（{exc}），重新打开微信后尝试分享")
+                            phone.prepare_device()
+                            sending = job.mode == "send"
+                            ok = phone.share_text(target, part, group=job.target.kind == "group")
+                        else:
+                            sending = job.mode == "send"
+                            ok = phone.send(target, part, current_chat=True)
+                        if sending:
+                            result.setdefault("text_sends", []).append([index, started_ms, int(time() * 1000), part])
+                        if not ok:
+                            break
+                        sending = False
                 else:
                     path, filename = assets[item.asset_id]
                     ok = phone.send_asset(target, item.type, path, filename, group=job.target.kind == "group")

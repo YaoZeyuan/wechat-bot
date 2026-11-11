@@ -64,6 +64,7 @@ app.include_router(reader_router)
 request_log = structlog.get_logger("wechat_bot.http")
 sender_log = structlog.get_logger("wechat_bot.sender")
 sender_console_lock = Lock()
+adb_status_lock = Lock()
 sender_steps: list[str] = []
 
 
@@ -231,7 +232,36 @@ def send(req: SendRequest) -> dict[str, Any]:
 
 @app.get("/api/sender/status")
 def sender_status() -> dict[str, bool]:
-    return {"connected": sum(item["state"] == "device" for item in _devices()) == 1}
+    with adb_status_lock:
+        return {"connected": sum(item["state"] == "device" for item in _devices()) == 1}
+
+
+@app.post("/api/sender/adb/restart")
+def restart_adb() -> dict[str, bool]:
+    if not sender_console_lock.acquire(blocking=False):
+        raise HTTPException(409, "正在执行手机操作，请稍后重启 ADB")
+    try:
+        with adb_status_lock:
+            setup_adb(load_config())
+            adb = shutil.which("adb")
+            if not adb:
+                raise HTTPException(503, "找不到 ADB，请检查本机 ADB 路径配置")
+            sender_log.info("adb_restart_started", msg="正在重启 ADB 服务")
+            for command in ("kill-server", "start-server"):
+                try:
+                    subprocess.run(
+                        [adb, command], capture_output=True, check=True,
+                        text=True, encoding="utf-8", errors="replace", timeout=10,
+                    )
+                except (OSError, subprocess.SubprocessError) as exc:
+                    sender_log.warning("adb_restart_failed", msg="ADB 重启失败",
+                                       command=command, error=str(exc), stderr=getattr(exc, "stderr", None))
+                    raise HTTPException(503, f"ADB 重启失败（{command}），请查看 Server 日志") from exc
+            connected = sum(item["state"] == "device" for item in _devices()) == 1
+            sender_log.info("adb_restart_finished", msg="ADB 服务已重启", connected=connected)
+            return {"connected": connected}
+    finally:
+        sender_console_lock.release()
 
 
 @app.post("/api/sender/send")

@@ -8,6 +8,7 @@ from threading import Lock
 from pydantic import BaseModel, Field
 
 from .reply import MessageEvent
+from .plugin import ai_chat
 
 PATH = Path(__file__).resolve().parents[1] / "local-data" / "group-plugins.json"
 LOCK = Lock()
@@ -61,9 +62,10 @@ def bot_replies(group_id, start, end):
     replies = []
     for payload, result in rows:
         job = json.loads(payload)
-        for index, earliest, latest in json.loads(result)["text_sends"]:
+        for index, earliest, latest, *sent_text in json.loads(result)["text_sends"]:
             if latest >= start and earliest <= end:
-                replies.append((job["messages"][index]["text"], earliest - 999, latest + 1000))
+                text = sent_text[0] if sent_text else job["messages"][index]["text"]
+                replies.append((text, earliest - 999, latest + 1000))
     return replies
 
 def daily_activity(source, event: MessageEvent) -> str:
@@ -124,24 +126,12 @@ def activity_board(source, event, rows, *, start, limit, members=None):
     return "\n".join(lines)
 
 
-def split_reply(text, limit=1800):
-    if len(text) <= limit:
-        return [text]
-    parts = []
-    while len(text) > limit:
-        split = text.rfind("\n", 0, limit + 1)
-        if split <= 0:
-            split = limit
-        parts.append(text[:split])
-        text = text[split:].removeprefix("\n")
-    if text:
-        parts.append(text)
-    return parts
-
 def dispatch(source, automation, event):
     from uuid import NAMESPACE_URL, uuid5
 
-    from .sender_jobs import Job, queue_job, run
+    from fastapi import HTTPException
+
+    from .sender_jobs import Job, get_job, queue_job, run
 
     legacy = automation.group_plugins(event.group_id)
     replies = []
@@ -161,15 +151,31 @@ def dispatch(source, automation, event):
             except SourceError as exc:
                 text = f"{keyword}暂不可用：{exc}"
         replies.append((plugin_id, text))
+    question = ai_chat.trigger(event.text) if legacy.get(ai_chat.PLUGIN_ID, False) else None
+    if question:
+        replies.append((ai_chat.PLUGIN_ID, ""))
     if not replies:
         return False
     details = source.conversation_details([event.group_id]).get(event.group_id, {})
     name = details.get("remark") or details.get("original_name") or event.group_id
     for plugin_id, text in replies:
+        request_id = uuid5(NAMESPACE_URL, f"wechat-bot:{event.group_id}:{event.message_id}:{plugin_id}")
+        if plugin_id == ai_chat.PLUGIN_ID and question:
+            try:
+                get_job(request_id)
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+            else:
+                continue
+            try:
+                text = ai_chat.answer(*question, request_id=str(request_id))
+            except ai_chat.ChatError as exc:
+                text = f"AI 问答暂不可用：{exc}"
         job = Job(
-            version=1, request_id=uuid5(NAMESPACE_URL, f"wechat-bot:{event.group_id}:{event.message_id}:{plugin_id}"),
+            version=1, request_id=request_id,
             mode="send", target={"kind": "group", "id": event.group_id, "name": name},
-            messages=[{"type": "text", "text": part} for part in split_reply(text)],
+            messages=[{"type": "text", "text": text}],
         )
         result, inserted = queue_job(job, strict=False, source=plugin_id)
         if inserted:
