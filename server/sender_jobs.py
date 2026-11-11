@@ -157,6 +157,7 @@ def resolve_target(target: Target) -> str:
     return name
 
 def run(job, result):
+    from sender import SendError
     from sender.accessibility import ShareRejected
     from server.main import _devices, create_sender, sender_console_lock, sender_log
 
@@ -201,10 +202,17 @@ def run(job, result):
                 sending = job.mode == "send"
                 if isinstance(item, TextMessage):
                     started_ms = int(time() * 1000)
-                    if hasattr(phone, "share_text"):
+                    sending = False
+                    try:
+                        phone.prepare_chat(target)
+                    except SendError:
+                        if not hasattr(phone, "share_text"):
+                            raise
+                        progress("会话内定位未通过，改用微信分享确认收件人")
+                        sending = job.mode == "send"
                         ok = phone.share_text(target, item.text, group=job.target.kind == "group")
                     else:
-                        phone.prepare_chat(target)
+                        sending = job.mode == "send"
                         ok = phone.send(target, item.text, current_chat=True)
                     if sending:
                         result.setdefault("text_sends", []).append([index, started_ms, int(time() * 1000)])
