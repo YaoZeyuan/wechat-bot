@@ -29,6 +29,7 @@ class Model(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
     thinking: Literal["disabled", "enabled"] | None = "disabled"
+    web_search: bool = False
 
 
 class Provider(BaseModel):
@@ -110,10 +111,15 @@ def answer(prefix: str, prompt: str, *, request_id: str | None = None) -> str:
         raise ChatError("请先在本地配置 API Key 和模型 ID")
     if provider.base_url.scheme != "https" or provider.base_url.username or provider.base_url.password or provider.base_url.query or provider.base_url.fragment:
         raise ChatError("模型 API 地址应为 HTTPS Base URL")
-    messages = [{"role": "user", "content": settings.reply_prefix + prompt}]
+    messages = []
+    if settings.reply_prefix:
+        messages.append({"role": "system", "content": settings.reply_prefix})
+    messages.append({"role": "user", "content": prompt})
     payload = {"model": model.id, "messages": messages}
     if model.thinking is not None:
         payload["thinking"] = {"type": model.thinking}
+    if route.provider == "doubao" and model.web_search:
+        payload["web_search_options"] = {}
     body = json.dumps(payload, ensure_ascii=False)
     endpoint = str(provider.base_url).rstrip("/") + "/chat/completions"
     request = Request(

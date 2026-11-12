@@ -222,9 +222,9 @@ uv run python -m server.export_history --snapshot local-data/snapshot --account 
 
 模型默认关闭深度思考。可在模型别名下设置 `"thinking": "disabled"`，使用 `"enabled"` 开启，或用 `null` 让服务商采用自身默认值。旧版字符串形式的模型 ID 也默认关闭思考。
 
-配置顶层的 `reply_prefix` 会原样拼在发给两个模型的用户消息正文前。需要换行分隔时，在配置值末尾加 `\n`。默认为空。
+配置顶层的 `reply_prefix` 会原样作为两个模型的 `system` 消息内容。留空时省略这条消息。
 
-在目标群的配置页启用「AI 问答」。DeepSeek 的触发前缀为 `ds`、`deepseek`、`大肥鱼`，豆包为 `豆包`、`doubao`、`包姐`。可在本地配置的 `routes.<路由名>.prefixes` 修改，英文大小写均可。插件把 `reply_prefix` 和触发词后的正文拼成单轮问题，使用 Sender 将模型回答和耗时发回原群。
+在目标群的配置页启用「AI 问答」。可在本地配置的 `routes.<路由名>.prefixes` 修改触发词，英文大小写均可。`strip_prefixes` 指定发给模型前要移除的触发词。提问人、正文和引用放在 `user` 消息里，模型回答和耗时由 Sender 发回原群。
 
 ## 参考项目与致谢
 

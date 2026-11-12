@@ -18,7 +18,8 @@
       "models": {
         "default": {
           "id": "",
-          "thinking": "disabled"
+          "thinking": "disabled",
+          "web_search": false
         }
       },
       "timeout_seconds": 20
