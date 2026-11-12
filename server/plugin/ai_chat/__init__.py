@@ -19,6 +19,7 @@ METADATA = {
 }
 CONFIG = Path(__file__).resolve().parents[3] / "plugins" / "ai_chat" / "config.json"
 log = structlog.get_logger("wechat_bot.ai_chat")
+PREFIX_SEPARATORS = re.compile(r"^[\s,，、.。｡!！?？:：;；…‥—–－-]+")
 
 
 class ChatError(RuntimeError):
@@ -64,13 +65,20 @@ def trigger(text: str) -> tuple[str, str] | None:
     candidates = []
     for route_id, route in settings.routes.items():
         strip_prefixes = {alias.strip().casefold() for alias in route.strip_prefixes}
-        for alias in [route_id] if route.prefixes is None else route.prefixes:
+        prefixes = [route_id] if route.prefixes is None else route.prefixes
+        for alias in [*prefixes, *route.strip_prefixes]:
             alias = alias.strip()
             if not alias:
                 continue
             match = re.match(re.escape(alias) + r"\s*", text, re.IGNORECASE)
-            if match and (prompt := text[match.end():]).strip():
-                content = prompt if alias.casefold() in strip_prefixes else text
+            if match:
+                strip_alias = alias.casefold() in strip_prefixes
+                prompt = text[match.end():]
+                if strip_alias:
+                    prompt = PREFIX_SEPARATORS.sub("", prompt)
+                if not prompt.strip():
+                    continue
+                content = prompt if strip_alias else text
                 candidates.append((len(alias), route_id, content))
     if candidates:
         longest = max(length for length, _, _ in candidates)
