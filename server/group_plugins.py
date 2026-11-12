@@ -166,7 +166,7 @@ def dispatch(source, automation, event, *, quotes=None):
             try:
                 author = contacts.get(event.sender_id, {})
                 name_hint = author.get("remark") or author.get("original_name") or ""
-                prompt = ai_chat.format_question(event.text, name_hint, quotes or [])
+                prompt = ai_chat.format_question(question[1], name_hint, quotes or [])
                 text = ai_chat.answer(question[0], prompt, request_id=str(request_id))
             except ai_chat.ChatError as exc:
                 text = f"AI 问答暂不可用：{exc}"

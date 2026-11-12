@@ -154,10 +154,18 @@ export const api = {
   retrySenderJob: (id: string) =>
     request<{ request_id: string }>(`/sender/history/${id}/retry`, { method: 'POST' }),
   senderProgress: () => request<{ running: boolean; steps: string[] }>('/sender/progress'),
-  senderStatus: () => request<{ connected: boolean }>('/sender/status'),
+  senderStatus: () => request<{ connected: boolean }>('/sender/status', { signal: AbortSignal.timeout(8000) }),
   restartAdb: () => request<{ connected: boolean }>('/sender/adb/restart', { method: 'POST' }),
   pairWireless: (address: string, code: string) =>
     request<WirelessStatus>('/sender/adb/pair', { method: 'POST', body: JSON.stringify({ address, code }) }),
+  createWirelessQr: () =>
+    request<{ id: string; image: string; expires_in: number }>('/sender/adb/qr', {
+      method: 'POST', signal: AbortSignal.timeout(8000),
+    }),
+  pollWirelessQr: (id: string, signal: AbortSignal) =>
+    request<({ status: 'waiting' } | ({ status: 'paired' } & WirelessStatus))>(
+      `/sender/adb/qr/${encodeURIComponent(id)}/poll`, { method: 'POST', signal },
+    ),
   connectWireless: (address: string) =>
     request<WirelessStatus>('/sender/adb/connect', { method: 'POST', body: JSON.stringify({ address }) }),
   sendFromConsole: (payload: SendPayload) =>

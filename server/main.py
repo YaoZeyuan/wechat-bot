@@ -8,16 +8,21 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import asyncio
+import base64
 import json
 import re
+import secrets
 import shutil
 import sqlite3
 import subprocess
 import sys
-from time import perf_counter, sleep
+from time import monotonic, perf_counter, sleep
 from uuid import uuid4
 from threading import Lock
 import structlog
+import qrcode
+from qrcode.image.svg import SvgPathFillImage
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from ipaddress import ip_address
@@ -57,7 +62,12 @@ from server.sender_jobs import recover_jobs, router as sender_jobs_router
 async def lifespan(app):
     recover_jobs()
     async with reader_lifespan(app):
-        yield
+        keepalive = asyncio.create_task(wireless_keepalive())
+        try:
+            yield
+        finally:
+            keepalive.cancel()
+            await asyncio.gather(keepalive, return_exceptions=True)
 
 
 app = FastAPI(title="wechat-bot", version="0.1.0", lifespan=lifespan)
@@ -67,6 +77,8 @@ request_log = structlog.get_logger("wechat_bot.http")
 sender_log = structlog.get_logger("wechat_bot.sender")
 sender_console_lock = Lock()
 adb_status_lock = Lock()
+qr_lock = Lock()
+qr_session: tuple[str, str, float] | None = None
 sender_steps: list[str] = []
 
 
@@ -266,6 +278,32 @@ def wireless_device_status(address: str, service: str = "") -> dict:
     return {"device": device, "device_count": len(devices)}
 
 
+def probe_wireless_device():
+    if not sender_console_lock.acquire(blocking=False):
+        return
+    try:
+        with adb_status_lock:
+            devices = _devices()
+            adb = shutil.which("adb")
+            if not adb or len(devices) != 1 or devices[0]["state"] != "device":
+                return
+            serial = devices[0]["serial"]
+            if ":" not in serial and not serial.endswith("._adb-tls-connect._tcp"):
+                return
+            subprocess.run([adb, "-s", serial, "shell", "true"], capture_output=True, timeout=8, check=True)
+            sender_log.debug("adb_keepalive_ok", msg="无线 ADB 保活探测成功")
+    except (OSError, subprocess.SubprocessError) as exc:
+        sender_log.warning("adb_keepalive_failed", msg="无线 ADB 保活探测失败", error_type=type(exc).__name__)
+    finally:
+        sender_console_lock.release()
+
+
+async def wireless_keepalive():
+    while True:
+        await asyncio.sleep(600)
+        await asyncio.to_thread(probe_wireless_device)
+
+
 def discover_wireless_device(adb: str, pair_address: str) -> dict:
     host = pair_address.rpartition(":")[0]
     for attempt in range(4):
@@ -340,6 +378,48 @@ def pair_wireless(req: WirelessPair):
     if not re.fullmatch(r"[0-9]{6}", code):
         raise HTTPException(422, "配对码应为六位数字")
     return wireless_adb("pair", req.address, code)
+
+
+@app.post("/api/sender/adb/qr")
+def create_wireless_qr():
+    global qr_session
+    service = "studio-" + secrets.token_hex(8)
+    password = secrets.token_hex(12)
+    image = qrcode.make(f"WIFI:T:ADB;S:{service};P:{password};;", image_factory=SvgPathFillImage)
+    encoded = base64.b64encode(image.to_string()).decode("ascii")
+    with qr_lock:
+        qr_session = (service, password, monotonic() + 120)
+    return {"id": service, "image": "data:image/svg+xml;base64," + encoded, "expires_in": 120}
+
+
+@app.post("/api/sender/adb/qr/{session_id}/poll")
+def poll_wireless_qr(session_id: str):
+    global qr_session
+    with qr_lock:
+        if not qr_session or qr_session[0] != session_id or monotonic() >= qr_session[2]:
+            raise HTTPException(410, "二维码已失效，请重新生成")
+        service, password, _ = qr_session
+        with adb_status_lock:
+            setup_adb(load_config())
+            adb = shutil.which("adb")
+            if not adb:
+                raise HTTPException(503, "找不到 ADB，请检查本机 ADB 路径配置")
+            try:
+                found = subprocess.run(
+                    [adb, "mdns", "services"], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=3,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return {"status": "waiting"}
+        for line in found.stdout.splitlines():
+            parts = line.split()
+            if len(parts) != 3 or parts[0] != service or parts[1].rstrip(".") != "_adb-tls-pairing._tcp":
+                continue
+            address = WirelessEndpoint.validate_address(parts[2])
+            result = wireless_adb("pair", address, password)
+            qr_session = None
+            return {"status": "paired", **result}
+        return {"status": "waiting"}
 
 
 @app.post("/api/sender/adb/connect")

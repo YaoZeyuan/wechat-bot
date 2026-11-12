@@ -40,7 +40,12 @@
       "prefixes": [
         "豆包",
         "doubao",
-        "包姐"
+        "包姐",
+        "豆娘"
+      ],
+      "strip_prefixes": [
+        "豆包",
+        "doubao"
       ]
     }
   },

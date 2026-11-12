@@ -44,6 +44,7 @@ class ModelRoute(BaseModel):
     provider: str
     model: str
     prefixes: list[str] | None = None
+    strip_prefixes: list[str] = Field(default_factory=list)
 
 
 class Settings(BaseModel):
@@ -61,13 +62,15 @@ def trigger(text: str) -> tuple[str, str] | None:
         return None
     candidates = []
     for route_id, route in settings.routes.items():
+        strip_prefixes = {alias.strip().casefold() for alias in route.strip_prefixes}
         for alias in [route_id] if route.prefixes is None else route.prefixes:
             alias = alias.strip()
             if not alias:
                 continue
             match = re.match(re.escape(alias) + r"\s*", text, re.IGNORECASE)
             if match and (prompt := text[match.end():]).strip():
-                candidates.append((len(alias), route_id, prompt))
+                content = prompt if alias.casefold() in strip_prefixes else text
+                candidates.append((len(alias), route_id, content))
     if candidates:
         longest = max(length for length, _, _ in candidates)
         matches = {(route_id, prompt) for length, route_id, prompt in candidates if length == longest}
