@@ -9,7 +9,10 @@ import sys
 import time
 import structlog
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from fastapi.responses import PlainTextResponse
+
+from .chat_transcript import read_transcript
 from pathlib import Path
 from typing import Literal
 from threading import Lock
@@ -413,6 +416,23 @@ def browse_conversations(
         raise HTTPException(502, str(exc)) from None
     log.info("chat_history_read", area="conversations", count=len(result["items"]))
     return result
+
+
+@router.get("/history/export", response_class=PlainTextResponse)
+def export_chat_history(
+    start: date, end: date, session_id: str = Query(min_length=1, max_length=256),
+) -> PlainTextResponse:
+    if end < start:
+        raise HTTPException(422, "结束日期不能早于开始日期")
+    try:
+        transcript = read_transcript(history_source(), session_id, start, end)
+    except SourceError as exc:
+        log.warning("chat_history_read_failed", area="export", error=str(exc))
+        raise HTTPException(502, str(exc)) from None
+    return PlainTextResponse(transcript, headers={
+        "Content-Disposition": f'attachment; filename="chat-{start}-{end}.txt"',
+        "Cache-Control": "no-store",
+    })
 
 
 @router.get("/history/messages")

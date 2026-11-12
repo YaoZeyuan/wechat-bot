@@ -11,6 +11,16 @@ import type {
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
+export async function downloadChatTranscript(sessionId: string, start: string, end: string) {
+  const query = new URLSearchParams({ session_id: sessionId, start, end })
+  const response = await fetch(`${BASE}/reader/history/export?${query}`)
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new Error(typeof body?.detail === 'string' ? body.detail : `导出失败（HTTP ${response.status}）`)
+  }
+  return response.blob()
+}
+
 export interface WirelessStatus {
   device: { serial: string; state: string; model: string } | null
   device_count: number
@@ -29,6 +39,8 @@ export interface HistoryMessage {
   direction: 'in' | 'out'
   kind: 'text' | 'link' | 'quote' | 'other'
   quotes?: { sender: string; text: string }[]
+  message_label?: string | null
+  forwarded?: { depth: number; sender: string; time: string; text: string; quotes: { sender: string; text: string }[] }[]
   link?: { url: string; title: string; description: string; source: string; cover: string } | null
   file_name?: string | null
   type_code: number

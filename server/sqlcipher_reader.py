@@ -196,25 +196,41 @@ class SqlCipherReader:
         items = self.messages(session_id, offset=offset, limit=limit + 1)["items"]
         has_more = len(items) > limit
         items = items[:limit]
+        self.populate_sender_names(items)
+        return {"items": items, "has_more": has_more}
+
+    def populate_sender_names(self, items, *, include_remarks=True, group_id=None):
         ids = sorted({item["sender"]["username"] for item in items if item["sender"]["username"]})
+        group_names = self.group_nicknames(group_id) if ids and group_id else {}
+        name_column = "COALESCE(NULLIF(remark,''), nick_name)" if include_remarks else "nick_name"
         names = {}
         if ids:
-            placeholders = ",".join("?" for _ in ids)
             with self.open(self.root / "contact" / "contact.db") as db:
-                names = dict(db.execute(f"""
-                    SELECT username, COALESCE(NULLIF(remark,''), NULLIF(nick_name,''), username)
-                    FROM contact WHERE username IN ({placeholders})
-                """, ids).fetchall())
+                for offset in range(0, len(ids), 500):
+                    batch = ids[offset:offset + 500]
+                    placeholders = ",".join("?" for _ in batch)
+                    names.update(db.execute(f"""
+                        SELECT username, {name_column}
+                        FROM contact WHERE username IN ({placeholders})
+                    """, batch).fetchall())
         for item in items:
             sender = item["sender"]["username"]
-            item["sender"]["display_name"] = names.get(sender) or sender
-        return {"items": items, "has_more": has_more}
+            item["sender"]["display_name"] = group_names.get(sender) or names.get(sender) or (sender if include_remarks else None)
+
+    def messages_in_range(self, session_id: str, *, start_seconds: int, end_seconds: int):
+        """Read every stored row in the half-open time range, oldest first."""
+        items = list(self.iter_messages(session_id, time_range=(start_seconds, end_seconds)))
+        items.reverse()
+        items.sort(key=lambda item: item["timestampMs"])
+        self.populate_sender_names(items, include_remarks=False,
+                                   group_id=session_id if session_id.endswith("@chatroom") else None)
+        return items
 
     def messages(self, session_id: str, *, offset=0, limit=1, **filters):
         with closing(self.iter_messages(session_id, limit=offset + limit)) as rows:
             return {"items": list(islice(rows, offset, offset + limit))}
 
-    def iter_messages(self, session_id: str, *, limit=-1):
+    def iter_messages(self, session_id: str, *, limit=-1, time_range: tuple[int, int] | None = None):
         table = "Msg_" + hashlib.md5(session_id.encode(), usedforsecurity=False).hexdigest()
         shards = sorted((self.root / "message").glob("message_*.db"))
         shards = [path for path in shards if re.fullmatch(r"message_\d+\.db", path.name)]
@@ -227,6 +243,8 @@ class SqlCipherReader:
         with ExitStack() as stack:
             streams = []
             lookup_dbs = []
+            time_filter = "WHERE m.create_time >= ? AND m.create_time < ?" if time_range is not None else ""
+            parameters = (*time_range, limit) if time_range is not None else (limit,)
             for path in shards:
                 db = stack.enter_context(self.open(path))
                 if not db.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
@@ -237,8 +255,9 @@ class SqlCipherReader:
                     SELECT m.local_id, m.sort_seq, m.create_time, m.local_type,
                            m.message_content, n.user_name
                     FROM "{table}" AS m LEFT JOIN Name2Id AS n ON n.rowid=m.real_sender_id
+                    {time_filter}
                     ORDER BY m.sort_seq DESC, m.local_id DESC LIMIT ?
-                """, (limit,))
+                """, parameters)
                 streams.append(tagged_rows(cursor, path.stem))
             merged = heapq.merge(
                 *streams, key=lambda pair: (pair[0]["sort_seq"], pair[0]["local_id"], pair[1]), reverse=True,
@@ -261,7 +280,7 @@ class SqlCipherReader:
 
     @staticmethod
     def decode_content(content, sender, type_code):
-        if type_code in (1, 49) and isinstance(content, bytes):
+        if type_code in (1, 49, 10000, 10002) and isinstance(content, bytes):
             if content.startswith(bytes.fromhex("28b52ffd")):
                 import zstandard
 
@@ -281,8 +300,11 @@ class SqlCipherReader:
         type_code = row["local_type"] & 0xFFFFFFFF
         content = self.decode_content(row["message_content"], sender, type_code)
         card = self.app_card(content, lookup_quote) if type_code == 49 and isinstance(content, str) else None
+        if type_code in (10000, 10002):
+            card = {"label": "系统消息", "title": self.system_message(content)}
         link = card if card and card.get("url") else None
         quote = card if card and "quotes" in card else None
+        summary = card if card and "label" in card else None
         return {
             "messageId": f'{shard}:{row["local_id"]}',
             "timestampMs": row["create_time"] * 1000,
@@ -290,26 +312,60 @@ class SqlCipherReader:
             "kind": "text" if type_code == 1 else "quote" if quote else "link" if link else "other",
             "type_code": row["local_type"],
             "sender": {"username": sender},
-            "text": quote["title"] if quote else content if type_code == 1 and isinstance(content, str) else "",
+            "text": quote["title"] if quote else summary["title"] if summary else content if type_code == 1 and isinstance(content, str) else "",
             "link": link,
-            "file_name": card["title"] if card and not link and not quote else None,
+            "file_name": card["title"] if card and not link and not quote and not summary else None,
+            "message_label": summary["label"] if summary else None,
+            "forwarded": summary.get("forwarded", []) if summary else [],
             "quotes": quote["quotes"] if quote else [],
         }
+
+    @staticmethod
+    def system_message(content):
+        if not isinstance(content, str):
+            return ""
+        text = re.sub(r"^[^\s:]+@chatroom:\r?\n", "", content).strip()
+        if not text.startswith("<"):
+            return text
+        try:
+            root = ET.fromstring(text)
+        except ET.ParseError:
+            return ""
+        if root.get("type") == "revokemsg":
+            notice = (root.findtext("./revokemsg/replacemsg") or root.findtext("./revokemsg/content") or "").strip()
+            return notice if "撤回" in notice and not notice.startswith("<") else "撤回了一条消息"
+        template = root.find(".//content_template")
+        if template is not None:
+            plain = (template.findtext("plain") or "").strip()
+            if plain:
+                return plain
+            values = {}
+            for link in template.findall("link_list/link"):
+                names = [name.text.strip() for name in link.findall(".//nickname") if name.text and name.text.strip()]
+                values[link.get("name")] = "、".join(names) or (link.findtext("plain") or link.findtext("title") or "").strip()
+            return re.sub(r"\$([\w-]+)\$", lambda match: values.get(match[1]) or "…",
+                          (template.findtext("template") or "").strip())
+        for path in (".//replacemsg", ".//plain", ".//text"):
+            value = (root.findtext(path) or "").strip()
+            if value:
+                return value
+        return ""
 
     @staticmethod
     def app_element(content: str):
         if len(content) > 1024 * 1024:
             return None
-        root = ET.fromstring(content.strip())
+        content = re.sub(r"^(<msg>\s*)<\?xml\s+[^?]*\?>", r"\1", content.strip(), count=1)
+        root = ET.fromstring(content)
         return root if root.tag == "appmsg" else root.find("appmsg")
 
     @staticmethod
-    def quote_lines(app, lookup_quote=None):
+    def quote_lines(app, lookup_quote=None, *, first_tag="refermsg"):
         labels = {"3": "图片", "34": "语音", "43": "视频", "47": "动画表情", "42": "名片", "48": "位置"}
         lines = []
         seen = set()
         for depth in range(3):
-            refer = app.find("refermsg")
+            refer = app.find(first_tag if depth == 0 else "refermsg")
             if refer is None:
                 break
             server_id = (refer.findtext("svrid") or "").strip()
@@ -356,7 +412,7 @@ class SqlCipherReader:
                     if kind == "49" and not raw and nested_kind != "57":
                         raw = "[链接]"
             label = labels.get(kind)
-            lines.append({"sender": sender, "text": f"[{label}]" if label else raw or "[引用消息]"})
+            lines.append({"sender": sender, "text": f"[{label}]" if label else raw or refer.findtext("referdesc") or "[引用消息]"})
             if depth == 2 or nested is None or (nested.findtext("type") or "").strip() != "57":
                 break
             next_refer = nested.find("refermsg")
@@ -364,6 +420,44 @@ class SqlCipherReader:
                 break
             app = nested
         return lines
+
+    @staticmethod
+    def forwarded_items(container, depth=1):
+        if container is None:
+            return []
+        root = container.find("recordinfo")
+        if root is None:
+            raw = (container.text or "").strip()
+            try:
+                root = ET.fromstring(raw) if raw else container
+            except ET.ParseError:
+                return []
+        labels = {"2": "图片", "3": "语音", "4": "视频", "5": "链接", "6": "位置", "7": "音乐",
+                  "8": "文件", "10": "名片", "15": "表情", "34": "语音", "43": "视频", "47": "表情"}
+        items = []
+        for item in root.findall("datalist/dataitem"):
+            kind = item.get("datatype", "")
+            title = (item.findtext("datatitle") or "").strip()
+            description = (item.findtext("datadesc") or "").strip()
+            nested = item.find("recordxml")
+            if nested is None:
+                nested = item.find("recorditem")
+            is_forward = kind == "17" or nested is not None
+            label = "聊天记录" if is_forward and depth == 2 else "合并转发的聊天记录" if is_forward else labels.get(kind, "其他消息")
+            body = (description or title or "（空白文本）") if kind == "1" and not is_forward else f"[{label}]"
+            if not is_forward and kind != "1" and (title or description):
+                body += " " + "\n".join(filter(None, (title, description)))
+            url = (item.findtext("link") or "").strip()
+            if kind == "5" and SqlCipherReader.is_web_url(url):
+                body += f"\n<{url}>"
+            items.append({
+                "depth": depth, "sender": (item.findtext("sourcename") or "").strip(),
+                "time": (item.findtext("sourcetime") or "").strip(), "text": body,
+                "quotes": SqlCipherReader.quote_lines(item, first_tag="refermsgitem"),
+            })
+            if is_forward and depth < 2:
+                items.extend(SqlCipherReader.forwarded_items(nested, depth + 1))
+        return items
 
     @staticmethod
     def app_card(content: str, lookup_quote=None):
@@ -374,6 +468,19 @@ class SqlCipherReader:
             kind = (app.findtext("type") or "").strip()
             if kind == "57":
                 return {"title": (app.findtext("title") or "").strip(), "quotes": SqlCipherReader.quote_lines(app, lookup_quote)}
+            if kind == "51":
+                title = (app.findtext("title") or "").strip() or (app.findtext("finderFeed/desc") or "").strip()
+                return {"label": "视频号卡片", "title": title}
+            if kind == "50":
+                nickname = (app.findtext("findernamecard/nickname") or "").strip()
+                account = (app.findtext("findernamecard/username") or "").strip()
+                title = " · ".join(filter(None, (nickname, account))) or (app.findtext("title") or "").strip()
+                return {"label": "视频号名片", "title": title}
+            if kind in {"1", "8", "19", "53", "62"}:
+                labels = {"1": "", "8": "自定义表情", "19": "合并转发的聊天记录", "53": "视频", "62": "拍一拍"}
+                title = (app.findtext("title") or "").strip()
+                return {"label": labels[kind], "title": title,
+                        "forwarded": SqlCipherReader.forwarded_items(app.find("recorditem")) if kind == "19" else []}
             title = (app.findtext("title") or "").strip()[:300]
             if kind == "6":
                 return {"title": title}

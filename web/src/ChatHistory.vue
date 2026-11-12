@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, type Conversation, type ConversationDetails, type HistoryMessage, type MonitoredGroup } from './api'
+import { api, downloadChatTranscript, type Conversation, type ConversationDetails, type HistoryMessage, type MonitoredGroup } from './api'
 
 const filters = [
   { key: 'all', label: '全部' }, { key: 'private', label: '联系人' }, { key: 'group', label: '群聊' },
@@ -14,6 +14,40 @@ const route = useRoute()
 const detailsVisible = ref(false)
 const details = ref<ConversationDetails>()
 const detailsError = ref('')
+const exportTarget = ref<Conversation>()
+const exportStart = ref('')
+const exportEnd = ref('')
+const exportBusy = ref(false)
+const exportError = ref('')
+
+function showExport(target: Conversation) {
+  exportTarget.value = target
+  exportStart.value = exportEnd.value = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
+  exportError.value = ''
+}
+
+async function exportHistory() {
+  const target = exportTarget.value
+  if (!target || exportBusy.value || !exportStart.value || !exportEnd.value) return
+  exportBusy.value = true
+  exportError.value = ''
+  try {
+    const blob = await downloadChatTranscript(target.id, exportStart.value, exportEnd.value)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `聊天记录-${exportStart.value}-${exportEnd.value}.txt`
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    exportTarget.value = undefined
+  } catch (cause) {
+    exportError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    exportBusy.value = false
+  }
+}
 const robotGroups = ref<MonitoredGroup[]>()
 const robotBusy = ref(false)
 const robotError = ref('')
@@ -203,6 +237,7 @@ onMounted(async () => {
                 </template>
               </template>
               <a-button @click="showDetails">详情</a-button>
+              <a-button @click="showExport(selected)">导出</a-button>
               <a-button :loading="messagesBusy" @click="openConversation(selected)">刷新</a-button>
             </div>
           </header>
@@ -214,8 +249,7 @@ onMounted(async () => {
             <p v-else-if="!messages.length && !messageError">本地库中没有此会话的消息。</p>
             <article v-for="message in ordered" :key="message.messageId" class="message-row"
               :class="{ outgoing: message.direction === 'out' }">
-              <small>{{ message.direction === 'out' ? '我' : message.sender.display_name || (selected.kind === 'private' ? selected.name : '未知发送者') }}
-                · {{ date(message.timestampMs) }}</small>
+              <small><template v-if="message.message_label !== '系统消息'">{{ message.direction === 'out' ? '我' : message.sender.display_name || (selected.kind === 'private' ? selected.name : '未知发送者') }} · </template>{{ date(message.timestampMs) }}</small>
               <div class="bubble">
                 <template v-if="message.kind === 'quote'">
                   <div v-if="message.text">{{ message.text }}</div>
@@ -233,6 +267,18 @@ onMounted(async () => {
                   <small>{{ message.link.url }}</small>
                 </a>
                 <template v-else-if="message.file_name">[文件] {{ message.file_name }}</template>
+                <template v-else-if="message.message_label != null">
+                  <div><strong v-if="message.message_label">[{{ message.message_label }}] </strong>{{ message.text }}</div>
+                  <div v-for="(entry, index) in message.forwarded" :key="index" class="quoted-message"
+                    :style="{ marginInlineStart: `${(entry.depth - 1) * 12}px` }">
+                    <small v-if="entry.sender || entry.time">{{ [entry.sender, entry.time].filter(Boolean).join(' · ') }}</small>
+                    <div>{{ entry.text }}</div>
+                    <div v-for="(quote, quoteIndex) in entry.quotes" :key="quoteIndex" class="quoted-message"
+                      :style="{ marginInlineStart: `${quoteIndex * 12}px` }">
+                      <strong v-if="quote.sender">{{ quote.sender }}： </strong>{{ quote.text }}
+                    </div>
+                  </div>
+                </template>
                 <template v-else>{{ content(message) }}</template>
               </div>
             </article>
@@ -241,6 +287,16 @@ onMounted(async () => {
         <div v-else class="empty-chat">{{ messageError || '从会话列表选择联系人或群聊查看消息。' }}</div>
       </section>
     </div>
+    <a-modal :visible="!!exportTarget" title="导出聊天记录" :footer="false"
+      @cancel="!exportBusy && (exportTarget = undefined)">
+      <form class="export-form" @submit.prevent="exportHistory">
+        <p>{{ exportTarget?.name }} · 北京时间 · Markdown 文本（.txt）</p>
+        <label>开始日期 <input v-model="exportStart" type="date" :max="exportEnd" required :disabled="exportBusy" /></label>
+        <label>结束日期 <input v-model="exportEnd" type="date" :min="exportStart" required :disabled="exportBusy" /></label>
+        <a-alert v-if="exportError" type="error">{{ exportError }}</a-alert>
+        <a-button type="primary" html-type="submit" :loading="exportBusy">下载 TXT</a-button>
+      </form>
+    </a-modal>
     <a-modal v-model:visible="detailsVisible" title="会话详情" :footer="false">
       <a-alert v-if="detailsError" type="error">{{ detailsError }}</a-alert>
       <dl v-else-if="details" class="details">
@@ -254,6 +310,8 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.export-form { display: grid; gap: 12px; }
+.export-form label { display: grid; gap: 4px; }
 .history-page { max-width: 1440px; margin: auto; padding: 24px clamp(12px, 3vw, 40px); }
 .history-title, .chat-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .history-title { margin-bottom: 16px; }
