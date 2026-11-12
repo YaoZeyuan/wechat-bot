@@ -374,6 +374,10 @@ def update_group_plugin(group_id: str, plugin_id: str, settings: GroupPluginSett
     if plugin_id not in PLUGINS or not any(item["group_id"] == group_id for item in automation.monitored_groups()):
         raise HTTPException(404, "未找到所选群或插件")
     if plugin_id in builtin_plugins.BUILTINS:
+        if plugin_id == "self_intro" and settings.enabled:
+            name = (settings.assistant_name or "").strip()
+            if not name or name.startswith("@") or not (settings.intro_reply or "").strip():
+                raise HTTPException(422, "请输入助手名字（无需填写 @）和介绍文案")
         builtin_plugins.save(group_id, plugin_id, settings)
     else:
         automation.set_group_plugin(group_id, plugin_id, settings.enabled)

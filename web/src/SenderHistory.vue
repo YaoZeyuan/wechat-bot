@@ -15,7 +15,7 @@ const retrying = ref(false)
 const sources: Record<string, string> = {
   manual: '手动发送', fixed_reply: '测试', daily_activity: '活跃日榜',
   total_activity: '活跃总榜', total_lurkers: '潜水总榜',
-  ai_chat: 'AI 问答', retry: '重试发送',
+  ai_chat: 'AI 问答', self_intro: '自我介绍', retry: '重试发送',
 }
 const statuses: Record<string, string> = {
   queued: '排队中', running: '执行中', completed: '完成', failed: '失败', uncertain: '待核对',

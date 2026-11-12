@@ -5,20 +5,23 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .reply import MessageEvent
 from .plugin import ai_chat
+from .plugin import self_intro
 
 PATH = Path(__file__).resolve().parents[1] / "local-data" / "group-plugins.json"
 LOCK = Lock()
 BEIJING = timezone(timedelta(hours=8))
 RANKINGS = {"daily_activity": "活跃日榜", "total_activity": "活跃总榜", "total_lurkers": "潜水总榜"}
-BUILTINS = tuple(RANKINGS)
+BUILTINS = (*RANKINGS, self_intro.PLUGIN_ID)
 
 
 class Settings(BaseModel):
     enabled: bool
+    assistant_name: str | None = Field(default=None, max_length=80)
+    intro_reply: str | None = Field(default=None, max_length=2500)
 
 
 def read_all():
@@ -38,7 +41,8 @@ def config(group_id, plugin_id, legacy):
 def save(group_id, plugin_id, settings):
     with LOCK:
         data = read_all()
-        data.setdefault(group_id, {})[plugin_id] = settings.model_dump()
+        fields = None if plugin_id == self_intro.PLUGIN_ID else {"enabled"}
+        data.setdefault(group_id, {})[plugin_id] = settings.model_dump(include=fields, exclude_none=True)
         PATH.parent.mkdir(parents=True, exist_ok=True)
         pending = PATH.with_suffix(".tmp")
         pending.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -131,6 +135,10 @@ def dispatch(source, automation, event, *, quotes=None):
 
     legacy = automation.group_plugins(event.group_id)
     replies = []
+    if quotes is None:
+        intro = config(event.group_id, self_intro.PLUGIN_ID, legacy)
+        if intro.enabled and intro.intro_reply and self_intro.match(event.text, (intro.assistant_name or "").strip()):
+            replies.append((self_intro.PLUGIN_ID, intro.intro_reply))
     for plugin_id, keyword in RANKINGS.items():
         if quotes is not None or event.text != keyword or not config(event.group_id, plugin_id, legacy).enabled:
             continue

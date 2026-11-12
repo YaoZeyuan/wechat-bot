@@ -79,6 +79,8 @@ export interface GroupPlugin {
   enabled: boolean
   version: string
   capability: string
+  assistant_name?: string | null
+  intro_reply?: string | null
 }
 
 interface Delivery {
@@ -175,9 +177,9 @@ export const api = {
     request<ConversationDetails>(`/reader/history/details?${new URLSearchParams({ session_id })}`),
   groupPlugins: (groupId: string) =>
     request<GroupPlugin[]>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins`),
-  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean) =>
+  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean, assistant_name?: string | null, intro_reply?: string | null) =>
     request<GroupPlugin>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins/${encodeURIComponent(pluginId)}`, {
-      method: 'PUT', body: JSON.stringify({ enabled }),
+      method: 'PUT', body: JSON.stringify({ enabled, assistant_name, intro_reply }),
     }),
   monitoredGroups: () => request<MonitoredGroup[]>('/reader/monitored-groups'),
   saveMonitoredGroup: (group: MonitoredGroup) =>

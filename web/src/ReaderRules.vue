@@ -63,7 +63,7 @@ function savePlugin(plugin: GroupPlugin, enabled: boolean) {
   const id = currentGroup.value?.group_id
   if (!id) return
   return run(async () => {
-    const updated = await api.saveGroupPlugin(id, plugin.id, enabled)
+    const updated = await api.saveGroupPlugin(id, plugin.id, enabled, plugin.assistant_name, plugin.intro_reply)
     if (currentGroup.value?.group_id === id) {
       plugins.value = plugins.value.map(item => item.id === updated.id ? updated : item)
       if (updated.id === 'open_baidu' && updated.enabled) {
@@ -274,6 +274,11 @@ onUnmounted(() => window.clearInterval(refreshTimer))
           <ul v-if="plugins.length" class="compact-list">
             <li v-for="plugin in plugins" :key="plugin.id">
               <div class="identity"><strong>{{ plugin.name }}</strong><small>{{ plugin.description }}</small></div>
+              <div v-if="plugin.id === 'self_intro'" class="identity">
+                <label>助手名字 <input v-model.trim="plugin.assistant_name" maxlength="80" placeholder="张八旦" :disabled="busy" /></label>
+                <label>介绍文案 <textarea v-model="plugin.intro_reply" maxlength="2500" rows="3" :disabled="busy" /></label>
+                <a-button size="small" :disabled="busy" @click="savePlugin(plugin, plugin.enabled)">保存参数</a-button>
+              </div>
               <a-tag :color="plugin.enabled ? 'green' : 'gray'">{{ plugin.enabled ? '启用' : '停用' }}</a-tag>
               <a-button size="small" :disabled="busy" @click="savePlugin(plugin, !plugin.enabled)">{{ plugin.enabled ? '停用' : '启用' }}</a-button>
             </li>
