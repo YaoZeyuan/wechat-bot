@@ -38,7 +38,7 @@ class Provider(BaseModel):
     base_url: HttpUrl
     api_key: SecretStr
     models: dict[str, str | Model]
-    timeout_seconds: float = Field(default=20, gt=0, le=60)
+    timeout_seconds: float = Field(default=20, gt=0, le=600)
 
 
 class ModelRoute(BaseModel):
@@ -114,19 +114,25 @@ def answer(prefix: str, prompt: str, *, request_id: str | None = None) -> str:
             model = Model(id=model)
     except (OSError, ValueError, KeyError):
         raise ChatError("请检查本地 plugins/ai_chat/config.json 中的服务商、触发词和模型配置") from None
+    reply, elapsed = complete(provider, model, route.provider, prompt, settings.reply_prefix, request_id=request_id)
+    return f"{reply}\n\n🕛模型:{model.id}; 耗时{int(elapsed + 0.5)} 秒"
+
+
+def complete(provider: Provider, model: Model, provider_id: str, prompt: str, system_prompt: str,
+             *, request_id: str | None = None, log_bodies: bool = True) -> tuple[str, float]:
     key = provider.api_key.get_secret_value().strip()
     if not key or not model.id.strip():
         raise ChatError("请先在本地配置 API Key 和模型 ID")
     if provider.base_url.scheme != "https" or provider.base_url.username or provider.base_url.password or provider.base_url.query or provider.base_url.fragment:
         raise ChatError("模型 API 地址应为 HTTPS Base URL")
     messages = []
-    if settings.reply_prefix:
-        messages.append({"role": "system", "content": settings.reply_prefix})
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
     payload = {"model": model.id, "messages": messages}
     if model.thinking is not None:
         payload["thinking"] = {"type": model.thinking}
-    if route.provider == "doubao" and model.web_search:
+    if provider_id == "doubao" and model.web_search:
         payload["web_search_options"] = {}
     body = json.dumps(payload, ensure_ascii=False)
     endpoint = str(provider.base_url).rstrip("/") + "/chat/completions"
@@ -136,9 +142,9 @@ def answer(prefix: str, prompt: str, *, request_id: str | None = None) -> str:
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         method="POST",
     )
-    context = log.bind(request_id=request_id, provider=route.provider, model=model.id)
+    context = log.bind(request_id=request_id, provider=provider_id, model=model.id)
     context.info("ai_chat_request", msg="正在请求模型", method="POST", url=endpoint,
-                 request_body=body.replace(key, "[已隐藏]"))
+                 request_bytes=len(request.data), request_body=body.replace(key, "[已隐藏]") if log_bodies else None)
     started = perf_counter()
     try:
         with build_opener(NoRedirect()).open(request, timeout=provider.timeout_seconds) as response:
@@ -146,7 +152,7 @@ def answer(prefix: str, prompt: str, *, request_id: str | None = None) -> str:
         elapsed = perf_counter() - started
         context.info("ai_chat_response", msg="已收到模型响应", status=response.status,
                      elapsed_seconds=round(elapsed, 3), response_bytes=len(data),
-                     response_body=data[:256 * 1024].decode("utf-8", errors="replace").replace(key, "[已隐藏]"))
+                     response_body=data[:256 * 1024].decode("utf-8", errors="replace").replace(key, "[已隐藏]") if log_bodies else None)
         if len(data) > 256 * 1024:
             raise ChatError("模型回复超出大小限制")
         text = json.loads(data)["choices"][0]["message"]["content"]
@@ -157,7 +163,7 @@ def answer(prefix: str, prompt: str, *, request_id: str | None = None) -> str:
             except OSError:
                 error_body = ""
         context.warning("ai_chat_http_error", msg="模型接口返回错误", status=exc.code,
-                        elapsed_seconds=round(perf_counter() - started, 3), response_body=error_body)
+                        elapsed_seconds=round(perf_counter() - started, 3), response_body=error_body if log_bodies else None)
         raise ChatError(f"模型接口返回 HTTP {exc.code}") from None
     except (URLError, OSError):
         context.warning("ai_chat_transport_error", msg="模型接口连接失败或超时",
@@ -167,5 +173,4 @@ def answer(prefix: str, prompt: str, *, request_id: str | None = None) -> str:
         raise ChatError("模型接口返回了无法识别的回复") from None
     if not isinstance(text, str) or not text.strip():
         raise ChatError("模型返回了空回复")
-    reply = text.rstrip()
-    return f"{reply}\n\n🕛模型:{model.id}; 耗时{int(elapsed + 0.5)} 秒"
+    return text.rstrip(), elapsed

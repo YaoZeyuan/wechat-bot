@@ -53,7 +53,7 @@ const robotBusy = ref(false)
 const robotError = ref('')
 const robotEnabled = computed(() => robotGroups.value?.some(group => group.group_id === selected.value?.id && group.enabled))
 const robotLimitReached = computed(() => !robotEnabled.value && (robotGroups.value?.filter(group => group.enabled).length ?? 0) >= 10)
-const robotLimitReason = '最多同时启用 10 个群机器人，请先在「规则与任务」暂停一个群。'
+const robotLimitReason = '最多同时启用 10 个群机器人，请先在「全局配置」暂停一个群。'
 let detailsVersion = 0
 const messages = ref<HistoryMessage[]>([])
 const timeline = ref<HTMLElement>()

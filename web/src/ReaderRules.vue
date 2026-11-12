@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import GlobalAiConfig from './GlobalAiConfig.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, type GroupPlugin, type KeywordRule, type MonitoredGroup } from './api'
@@ -205,13 +206,14 @@ onUnmounted(() => window.clearInterval(refreshTimer))
   <main class="page rules-page">
     <header class="page-heading">
       <RouterLink v-if="isGroupPage" to="/rules">返回监听群列表</RouterLink>
-      <h1>{{ isGroupPage ? '群机器人配置' : '规则与任务' }}</h1>
-      <p v-if="!isGroupPage">设置全局读取频率，或从监听群列表进入群机器人配置。</p>
+      <h1>{{ isGroupPage ? '群机器人配置' : '全局配置' }}</h1>
+      <p v-if="!isGroupPage">配置全局监听和默认 AI 模型，或从监听群列表进入群机器人配置。</p>
     </header>
 
     <a-alert v-if="error" type="error">{{ error }}</a-alert>
     <a-alert v-if="notice" type="success">{{ notice }}</a-alert>
 
+    <GlobalAiConfig v-if="!isGroupPage" />
     <section v-if="!isGroupPage" class="card" aria-labelledby="global-heading">
       <div class="card-head">
         <h2 id="global-heading">全局监听</h2>

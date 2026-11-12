@@ -26,6 +26,16 @@ export interface WirelessStatus {
   device_count: number
 }
 
+export interface GlobalAiSettings {
+  provider: 'deepseek' | 'doubao' | 'compatible'
+  base_url: string
+  model: string
+  thinking: 'enabled' | 'disabled' | null
+  timeout_seconds: number
+  summary_prompt: string
+  has_api_key: boolean
+}
+
 export interface Conversation {
   id: string
   name: string
@@ -149,6 +159,9 @@ export interface SenderHistoryItem {
 }
 
 export const api = {
+  globalAi: () => request<GlobalAiSettings>('/reader/global-ai'),
+  saveGlobalAi: (settings: Omit<GlobalAiSettings, 'has_api_key'> & { api_key: string }) =>
+    request<GlobalAiSettings>('/reader/global-ai', { method: 'PUT', body: JSON.stringify(settings) }),
   senderHistory: (offset = 0) => request<SenderHistoryItem[]>(`/sender/history?offset=${offset}`),
   senderHistoryScreen: (id: string, step: number) => `${BASE}/sender/history/${id}/screens/${step}`,
   async senderScreen() {

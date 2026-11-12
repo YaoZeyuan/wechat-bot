@@ -13,6 +13,7 @@ from datetime import date, datetime, timezone
 from fastapi.responses import PlainTextResponse
 
 from .chat_transcript import read_transcript
+from . import global_ai
 from pathlib import Path
 from typing import Literal
 from threading import Lock
@@ -31,6 +32,26 @@ from .polling import incoming_text, message_id, poll_group
 from .reply import SendTask
 
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
+
+
+@router.get("/global-ai")
+def get_global_ai():
+    try:
+        return global_ai.public_settings()
+    except global_ai.ChatError as exc:
+        raise HTTPException(502, str(exc)) from None
+
+
+@router.put("/global-ai")
+def set_global_ai(settings: global_ai.Settings):
+    if settings.base_url.scheme != "https" or settings.base_url.username or settings.base_url.password or settings.base_url.query or settings.base_url.fragment:
+        raise HTTPException(422, "模型 API 地址应为 HTTPS Base URL")
+    try:
+        global_ai.save(settings)
+        return global_ai.public_settings()
+    except (OSError, global_ai.ChatError) as exc:
+        log.warning("global_ai_save_failed", msg="全局 AI 配置保存失败", error_type=type(exc).__name__)
+        raise HTTPException(502, "无法保存全局 AI 配置") from None
 log = structlog.get_logger("wechat_bot.reader")
 automation = Automation(Path(__file__).resolve().parent.parent / "automation.db")
 reader_status = {"enabled": False, "running": False, "error": None, "last_success_at": None, "interval_seconds": 5}

@@ -4,6 +4,7 @@ import webbrowser
 from collections.abc import Callable
 
 from .plugin import ai_chat
+from .plugin import chat_summary
 from .plugin import self_intro
 from .reply import MessageEvent, Reply
 
@@ -23,6 +24,7 @@ HANDLERS: dict[str, Callable[[MessageEvent], Reply | None]] = {
 # Stable plugin IDs are shared by rules, the catalog and group overrides.
 PLUGINS = {
     ai_chat.PLUGIN_ID: ai_chat.METADATA,
+    chat_summary.PLUGIN_ID: chat_summary.METADATA,
     self_intro.PLUGIN_ID: self_intro.METADATA,
     "open_baidu": {"name": "打开百度", "description": "收到配置的关键词后，在电脑默认浏览器打开百度", "default_enabled": False, "version": "1.0.0", "capability": "浏览器"},
     "daily_activity": {"name": "活跃日榜", "description": "统计北京时间当天本群发言数，回复前十名", "default_enabled": False, "version": "1.0.0", "capability": "手机发送"},

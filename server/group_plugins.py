@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 
 from .reply import MessageEvent
 from .plugin import ai_chat
+from .plugin import chat_summary
+from .ciphertalk import SourceError
 from .plugin import self_intro
 
 PATH = Path(__file__).resolve().parents[1] / "local-data" / "group-plugins.json"
@@ -135,6 +137,14 @@ def dispatch(source, automation, event, *, quotes=None):
 
     legacy = automation.group_plugins(event.group_id)
     replies = []
+    summary = None
+    if quotes is None and legacy.get(chat_summary.PLUGIN_ID, False):
+        try:
+            summary = chat_summary.command(event.text, event.timestamp_ms)
+        except ValueError:
+            replies.append((chat_summary.PLUGIN_ID, "日期无效，请使用 YYYYMMDD 格式，例如 梳理20261111。"))
+        if summary:
+            replies.append((chat_summary.PLUGIN_ID, ""))
     if quotes is None:
         intro = config(event.group_id, self_intro.PLUGIN_ID, legacy)
         if intro.enabled and intro.intro_reply and self_intro.match(event.text, (intro.assistant_name or "").strip()):
@@ -145,8 +155,6 @@ def dispatch(source, automation, event, *, quotes=None):
         if plugin_id == "daily_activity":
             text = daily_activity(source, event)
         else:
-            from .ciphertalk import SourceError
-
             try:
                 text = total_activity(source, event, lurkers=plugin_id == "total_lurkers")
             except SourceError as exc:
@@ -163,7 +171,7 @@ def dispatch(source, automation, event, *, quotes=None):
     name = details.get("remark") or details.get("original_name") or event.group_id
     for plugin_id, text in replies:
         request_id = uuid5(NAMESPACE_URL, f"wechat-bot:{event.group_id}:{event.message_id}:{plugin_id}")
-        if plugin_id == ai_chat.PLUGIN_ID and question:
+        if plugin_id in {ai_chat.PLUGIN_ID, chat_summary.PLUGIN_ID}:
             try:
                 get_job(request_id)
             except HTTPException as exc:
@@ -171,6 +179,7 @@ def dispatch(source, automation, event, *, quotes=None):
                     raise
             else:
                 continue
+        if plugin_id == ai_chat.PLUGIN_ID and question:
             try:
                 author = contacts.get(event.sender_id, {})
                 name_hint = author.get("remark") or author.get("original_name") or ""
@@ -178,10 +187,19 @@ def dispatch(source, automation, event, *, quotes=None):
                 text = ai_chat.answer(question[0], prompt, request_id=str(request_id))
             except ai_chat.ChatError as exc:
                 text = f"AI 问答暂不可用：{exc}"
+        messages = [{"type": "text", "text": text}]
+        if plugin_id == chat_summary.PLUGIN_ID and summary:
+            try:
+                messages = [chat_summary.make_report(source, event, request_id, *summary)]
+            except (OSError, RuntimeError, ValueError, SourceError, chat_summary.subprocess.SubprocessError) as exc:
+                chat_summary.log.warning("chat_summary_failed", msg="聊天梳理失败",
+                                         request_id=str(request_id), error_type=type(exc).__name__)
+                reason = str(exc) if isinstance(exc, (ai_chat.ChatError, SourceError)) else "无法生成或准备 PDF，请查看 Server 日志"
+                messages = [{"type": "text", "text": f"聊天梳理失败：{reason}"}]
         job = Job(
             version=1, request_id=request_id,
             mode="send", target={"kind": "group", "id": event.group_id, "name": name},
-            messages=[{"type": "text", "text": text}],
+            messages=messages,
         )
         result, inserted = queue_job(job, strict=False, source=plugin_id)
         if inserted:

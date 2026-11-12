@@ -4,6 +4,7 @@ import shutil
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from time import time
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
@@ -128,6 +129,27 @@ async def upload(asset_id: UUID, filename: str, request: Request):
     (folder / ("asset" + suffix)).write_bytes(data)
     (folder / "filename.json").write_text(json.dumps(filename), encoding="utf-8")
     return {"asset_id": asset_id}
+
+
+def stage_local_pdf(asset_id: UUID, path: Path, filename: str):
+    if path.stat().st_size > MAX_ASSET:
+        raise ValueError("生成的 PDF 超过 Sender 的 20 MB 限制")
+    folder = root / "assets" / str(asset_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile(dir=folder, delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            with path.open("rb") as source:
+                shutil.copyfileobj(source, stream)
+        except Exception:
+            stream.close()
+            temporary.unlink(missing_ok=True)
+            raise
+    try:
+        temporary.replace(folder / "asset.pdf")
+        (folder / "filename.json").write_text(json.dumps(filename), encoding="utf-8")
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 @router.post("/jobs", status_code=202)

@@ -11,6 +11,7 @@ dependencies = [
     "zstandard>=0.23,<1",
     "structlog>=25,<27",
     "qrcode>=8,<9",
+    "markdown-it-py>=3,<5",
 ]
 
 [project.scripts]
@@ -23,7 +24,10 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["server", "sender"]
+include = ["server", "server.*", "sender", "sender.*"]
+
+[tool.setuptools.package-data]
+"server.plugin.chat_summary" = ["default_prompt.md"]
 
 [tool.setuptools]
 py-modules = ["send"]
