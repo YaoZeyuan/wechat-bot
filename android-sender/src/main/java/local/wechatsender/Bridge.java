@@ -165,27 +165,30 @@ public final class Bridge extends AccessibilityService {
         List<AccessibilityNodeInfo> search = matching(AccessibilityNodeInfo::isEditable);
         if (search.isEmpty()) {
             click(unique(named("搜索"), "@成员搜索入口"));
-        pause();
+            pause();
         }
-        setText(unique(AccessibilityNodeInfo::isEditable, "@成员搜索框"), nickname);
-        Set<AccessibilityNodeInfo> rows = new LinkedHashSet<>();
-        for (AccessibilityNodeInfo candidate : matching(n -> !n.isEditable() && named(nickname).test(n))) {
-            AccessibilityNodeInfo row = clickable(candidate);
-            if (row != null && !row.isEditable()) rows.add(row);
+        List<AccessibilityNodeInfo> candidates = mentionRows(nickname);
+        if (candidates.isEmpty() && !nickname.equals(username)) {
+            candidates = mentionRows(username);
+            require(candidates.size() <= 1, "找到多个同名 @成员，无法确认：" + username);
         }
-        List<AccessibilityNodeInfo> verified = new ArrayList<>();
-        for (AccessibilityNodeInfo row : rows) {
-            if (containsLabel(row, username)) verified.add(row);
-        }
-        List<AccessibilityNodeInfo> candidates = verified.isEmpty() ? new ArrayList<>(rows) : verified;
         require(!candidates.isEmpty(), "未找到匹配的 @成员：" + nickname + " / " + username);
-        require(candidates.size() == 1, "找到多个同名 @成员，无法确认：" + nickname + " / " + username);
         AccessibilityNodeInfo row = candidates.get(0);
         click(row);
         pause();
         require(chatReady(target), "@成员选择后未返回目标群");
         String after = value(unique(AccessibilityNodeInfo::isEditable, "聊天输入框").getText()).toString();
         require(after.startsWith(before + "@") && after.length() > before.length() + 1, "@成员未写入输入框");
+    }
+
+    private List<AccessibilityNodeInfo> mentionRows(String name) throws Exception {
+        setText(unique(AccessibilityNodeInfo::isEditable, "@成员搜索框"), name);
+        Set<AccessibilityNodeInfo> rows = new LinkedHashSet<>();
+        for (AccessibilityNodeInfo node : matching(n -> !n.isEditable() && named(name).test(n))) {
+            AccessibilityNodeInfo row = clickable(node);
+            if (row != null && !row.isEditable()) rows.add(row);
+        }
+        return new ArrayList<>(rows);
     }
 
     private static boolean containsLabel(AccessibilityNodeInfo node, String label) {
