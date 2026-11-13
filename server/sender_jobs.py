@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 router = APIRouter(prefix="/api/sender")
 root = Path(__file__).resolve().parents[1] / "local-data" / "sender"
@@ -24,9 +24,18 @@ class Target(BaseModel):
     name: str = Field(min_length=1, max_length=256)
 
 
+MemberName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+
+
+class Mention(BaseModel):
+    group_nickname: MemberName
+    username: MemberName
+
+
 class TextMessage(BaseModel):
     type: Literal["text"]
     text: str = Field(min_length=1, max_length=256 * 1024)
+    mentions: list[Mention] = Field(default_factory=list, max_length=10)
 
 
 def split_text(text: str) -> list[str]:
@@ -57,6 +66,12 @@ class Job(BaseModel):
     mode: Literal["send", "dry_run"]
     target: Target
     messages: list[Annotated[TextMessage | AssetMessage, Field(discriminator="type")]] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_mentions(self):
+        if self.target.kind != "group" and any(isinstance(item, TextMessage) and item.mentions for item in self.messages):
+            raise ValueError("@成员仅支持群聊")
+        return self
 
 
 def database():
@@ -392,15 +407,21 @@ def run(job, result):
                         try:
                             phone.prepare_chat(target)
                         except SendError as exc:
-                            if not hasattr(phone, "share_text"):
+                            if item.mentions or not hasattr(phone, "share_text"):
                                 raise
                             progress(f"会话内定位未通过（{exc}），重新打开微信后尝试分享")
                             phone.prepare_device()
                             sending = job.mode == "send"
                             ok = phone.share_text(target, part, group=job.target.kind == "group")
                         else:
-                            sending = job.mode == "send"
-                            ok = phone.send(target, part, current_chat=True)
+                            if item.mentions and part_index == 1:
+                                if not hasattr(phone, "send_mentions"):
+                                    raise SendError("@成员需要手机无障碍 Sender")
+                                sending = job.mode == "send"
+                                ok = phone.send_mentions(target, part, [member.model_dump() for member in item.mentions])
+                            else:
+                                sending = job.mode == "send"
+                                ok = phone.send(target, part, current_chat=True)
                         if sending:
                             result.setdefault("text_sends", []).append([index, started_ms, int(time() * 1000), part])
                         if not ok:

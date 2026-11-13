@@ -2,6 +2,8 @@ package local.wechatsender;
 
 import android.accessibilityservice.AccessibilityService;
 import android.graphics.Rect;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 import android.os.Bundle;
@@ -98,14 +100,30 @@ public final class Bridge extends AccessibilityService {
                 + "，页面控件：" + pageShape(target));
             return new JSONObject();
         }
-        require(action.equals("text"), "未知操作");
+        boolean mentioning = action.equals("mention_text");
+        require(action.equals("text") || mentioning, "未知操作");
         require(chatReady(target), "当前会话标题未匹配");
         AccessibilityNodeInfo input = unique(n -> n.isEditable(), "聊天输入框");
         clearDraft(input);
         String text = request.getString("text");
         boolean dryRun = request.getBoolean("dry_run");
-        int before = matching(n -> !n.isEditable() && text.contentEquals(value(n.getText()))).size();
-        setText(input, text);
+        if (mentioning) {
+            org.json.JSONArray mentions = request.getJSONArray("mentions");
+            require(mentions.length() > 0 && mentions.length() <= 10, "@成员数量无效");
+            for (int i = 0; i < mentions.length(); i++) {
+                JSONObject member = mentions.getJSONObject(i);
+                addMention(target, member.getString("group_nickname"), member.getString("username"));
+            }
+            input = unique(AccessibilityNodeInfo::isEditable, "聊天输入框");
+            String prefix = value(input.getText()).toString();
+            paste(input, text);
+            text = prefix + text;
+            require(input.refresh() && text.contentEquals(value(input.getText())), "@成员或正文未通过校验");
+        } else {
+            setText(input, text);
+        }
+        final String expected = text;
+        int before = matching(n -> !n.isEditable() && expected.contentEquals(value(n.getText()))).size();
         if (dryRun) {
             setText(unique(n -> n.isEditable(), "聊天输入框"), "");
         } else {
@@ -115,10 +133,52 @@ public final class Bridge extends AccessibilityService {
             click(send);
             pause();
             require(chatReady(target), "发送后会话标题未匹配");
-            require(matching(n -> !n.isEditable() && text.contentEquals(value(n.getText()))).size() > before,
+            require(matching(n -> !n.isEditable() && expected.contentEquals(value(n.getText()))).size() > before,
                 "已点击发送，但未核对到完整文本");
         }
         return new JSONObject();
+    }
+
+    private void paste(AccessibilityNodeInfo input, String text) throws Exception {
+        ClipboardManager clipboard = getSystemService(ClipboardManager.class);
+        clipboard.setPrimaryClip(ClipData.newPlainText("Sender", text));
+        require(input.performAction(AccessibilityNodeInfo.ACTION_PASTE), "无法粘贴到微信输入框");
+        pause();
+    }
+
+    private void addMention(String target, String nickname, String username) throws Exception {
+        require(chatReady(target), "@成员前会话标题未匹配");
+        AccessibilityNodeInfo input = unique(AccessibilityNodeInfo::isEditable, "聊天输入框");
+        String before = input.isShowingHintText() ? "" : value(input.getText()).toString();
+        click(input);
+        paste(input, "@");
+        require(!matching(named("选择提醒的人")).isEmpty(), "微信未打开 @成员选择器");
+        List<AccessibilityNodeInfo> search = matching(AccessibilityNodeInfo::isEditable);
+        if (search.isEmpty()) {
+            click(unique(named("搜索"), "@成员搜索入口"));
+            pause();
+        }
+        setText(unique(AccessibilityNodeInfo::isEditable, "@成员搜索框"), nickname);
+        for (AccessibilityNodeInfo candidate : matching(n -> !n.isEditable() && named(nickname).test(n))) {
+            AccessibilityNodeInfo row = clickable(candidate);
+            if (row == null || (!nickname.equals(username) && !containsLabel(row, username))) continue;
+            click(row);
+            pause();
+            require(chatReady(target), "@成员选择后未返回目标群");
+            String after = value(unique(AccessibilityNodeInfo::isEditable, "聊天输入框").getText()).toString();
+            require(after.startsWith(before + "@") && after.length() > before.length() + 1, "@成员未写入输入框");
+            return;
+        }
+        throw new IOException("未找到匹配的 @成员：" + nickname + " / " + username);
+    }
+
+    private static boolean containsLabel(AccessibilityNodeInfo node, String label) {
+        if (named(label).test(node)) return true;
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null && containsLabel(child, label)) return true;
+        }
+        return false;
     }
 
     private JSONObject shareAsset(JSONObject request, String target, boolean[] clicked) throws Exception {
