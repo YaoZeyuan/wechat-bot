@@ -26,6 +26,7 @@ class MessageEvent(ContractModel):
     author: MessageAuthor | None = None
     timestamp_ms: int = Field(gt=0)
     text: str
+    mentioned_user_ids: tuple[NonEmpty, ...] = ()
 
 
 class Text(ContractModel):

@@ -249,11 +249,13 @@ class SqlCipherReader:
                 db = stack.enter_context(self.open(path))
                 if not db.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
                     continue
-                if any(column[1] == "server_id" for column in db.execute(f'PRAGMA table_info("{table}")')):
+                columns = {column[1] for column in db.execute(f'PRAGMA table_info("{table}")')}
+                if "server_id" in columns:
                     lookup_dbs.append(db)
+                source_column = "m.source" if "source" in columns else "NULL"
                 cursor = db.execute(f"""
                     SELECT m.local_id, m.sort_seq, m.create_time, m.local_type,
-                           m.message_content, n.user_name
+                           m.message_content, n.user_name, {source_column} AS message_source
                     FROM "{table}" AS m LEFT JOIN Name2Id AS n ON n.rowid=m.real_sender_id
                     {time_filter}
                     ORDER BY m.sort_seq DESC, m.local_id DESC LIMIT ?
@@ -312,6 +314,7 @@ class SqlCipherReader:
             "kind": "text" if type_code == 1 else "quote" if quote else "link" if link else "other",
             "type_code": row["local_type"],
             "sender": {"username": sender},
+            "mentioned_user_ids": self.mentioned_user_ids(row["message_source"]) if type_code in (1, 49) else [],
             "text": quote["title"] if quote else summary["title"] if summary else content if type_code == 1 and isinstance(content, str) else "",
             "link": link,
             "file_name": card["title"] if card and not link and not quote and not summary else None,
@@ -319,6 +322,18 @@ class SqlCipherReader:
             "forwarded": summary.get("forwarded", []) if summary else [],
             "quotes": quote["quotes"] if quote else [],
         }
+
+    @classmethod
+    def mentioned_user_ids(cls, source):
+        source = cls.decode_content(source, None, 49)
+        if not isinstance(source, str) or not source.strip():
+            return []
+        try:
+            root = ET.fromstring(source.strip())
+        except ET.ParseError:
+            return []
+        targets = root.findtext("atuserlist") or ""
+        return [target.strip() for target in targets.split(",") if target.strip()]
 
     @staticmethod
     def system_message(content):

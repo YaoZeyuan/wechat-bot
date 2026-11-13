@@ -37,6 +37,7 @@ def incoming_text(group_id: str, row: dict, identity: str) -> MessageEvent | Non
         author=MessageAuthor(user_id=sender, group_nickname=sender_info.get("group_nickname"),
                              username=sender_info.get("original_name"), remark=sender_info.get("remark")),
         timestamp_ms=timestamp, text=row.get("text", row.get("content", "")),
+        mentioned_user_ids=row.get("mentioned_user_ids") or (),
     )
 
 
