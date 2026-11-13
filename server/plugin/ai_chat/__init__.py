@@ -196,7 +196,7 @@ def complete(provider: Provider, model: Model, provider_id: str, prompt: str, sy
     )
     context = log.bind(request_id=request_id, provider=provider_id, model=model.id)
     context.info("ai_chat_request", msg="正在请求模型", method="POST", url=endpoint,
-                 request_bytes=len(request.data), request_body=body.replace(key, "[已隐藏]") if log_bodies else None)
+                 request_bytes=len(request.data), request_body=body if log_bodies else None)
     started = perf_counter()
     try:
         with build_opener(NoRedirect()).open(request, timeout=provider.timeout_seconds) as response:
@@ -204,14 +204,14 @@ def complete(provider: Provider, model: Model, provider_id: str, prompt: str, sy
         elapsed = perf_counter() - started
         context.info("ai_chat_response", msg="已收到模型响应", status=response.status,
                      elapsed_seconds=round(elapsed, 3), response_bytes=len(data),
-                     response_body=data[:256 * 1024].decode("utf-8", errors="replace").replace(key, "[已隐藏]") if log_bodies else None)
+                     response_body=data[:256 * 1024].decode("utf-8", errors="replace") if log_bodies else None)
         if len(data) > 256 * 1024:
             raise ChatError("模型回复超出大小限制")
         text = json.loads(data)["choices"][0]["message"]["content"]
     except HTTPError as exc:
         with exc:
             try:
-                error_body = exc.read(8192).decode("utf-8", errors="replace").replace(key, "[已隐藏]")
+                error_body = exc.read(8192).decode("utf-8", errors="replace")
             except OSError:
                 error_body = ""
         context.warning("ai_chat_http_error", msg="模型接口返回错误", status=exc.code,

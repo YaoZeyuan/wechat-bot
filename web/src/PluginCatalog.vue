@@ -6,6 +6,7 @@ import { IconApps, IconSettings, IconRefresh } from '@arco-design/web-vue/es/ico
 import { api, type GroupPlugin, type MonitoredGroup } from './api'
 import PluginSettings from './PluginSettings.vue'
 import AiChatSettings from './AiChatSettings.vue'
+import SummaryPreview from './SummaryPreview.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -119,7 +120,7 @@ onMounted(load)
         <PluginSettings v-else-if="settings" :key="`${groupId}:${settings.id}`" :plugin="settings" :group-id="groupId" @saved="update" />
         <p v-else-if="!groupError" class="muted">选择一个监听群后即可编辑此插件。</p>
         <AiChatSettings v-if="active.id === 'ai_chat'" />
-        <RouterLink v-if="active.id === 'chat_summary'" to="/rules">查看全局 AI 配置</RouterLink>
+        <SummaryPreview v-if="active.id === 'chat_summary'" :group-id="groupId" />
       </a-card>
     </div>
   </main>

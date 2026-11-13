@@ -55,5 +55,5 @@ def summarize(transcript: str, request_id: str) -> str:
     provider = Provider(base_url=settings.base_url, api_key=settings.api_key, models={},
                         timeout_seconds=settings.timeout_seconds)
     markdown, _ = complete(provider, model, settings.provider, transcript, settings.summary_prompt,
-                           request_id=request_id, log_bodies=False)
+                           request_id=request_id)
     return markdown

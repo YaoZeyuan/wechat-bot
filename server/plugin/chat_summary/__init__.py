@@ -33,7 +33,7 @@ def command(text, timestamp_ms):
     return day, matched[1] == "重新梳理"
 
 
-def render_pdf(markdown, output):
+def render_pdf(markdown, output, *, html_output=None):
     edge = Path(os.environ.get("ProgramFiles(x86)", "")) / "Microsoft/Edge/Application/msedge.exe"
     browser = shutil.which("msedge") or shutil.which("chromium") or shutil.which("google-chrome")
     browser = browser or (str(edge) if edge.is_file() else None)
@@ -50,17 +50,22 @@ def render_pdf(markdown, output):
         page.write_text("""<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
 <style>
-@page { size: A4; margin: 17mm 17mm 19mm; }
-body { font: 14px/1.75 "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #172033;
+@page { size: 393px 852px; margin: 22px 20px 26px; }
+body { margin: 0; font: 16px/1.65 "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #172033;
 overflow-wrap: anywhere; print-color-adjust: exact; }
 h1,h2,h3 { break-after: avoid; line-height: 1.4; color: #18315b; }
+h1 { font-size: 24px; }
+h2 { font-size: 20px; }
+h3 { font-size: 17px; }
 h2 { border-bottom: 1px solid #d7deea; padding-bottom: .35em; }
 blockquote { margin: 1em 0; padding: .2em .9em; border-left: 3px solid #527bb7; background: #edf3fb; }
-table { border-collapse: collapse; width: 100%; }
+table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 th,td { border: 1px solid #d7deea; padding: .3em .5em; }
 pre { white-space: pre-wrap; background: #f0f3f7; padding: .6em; }
 a { color: #254f90; }
 </style><body>""" + body + "</body></html>", encoding="utf-8")
+        if html_output is not None:
+            shutil.copyfile(page, html_output)
         subprocess.run([browser, "--headless", "--no-first-run", "--disable-background-networking",
                         f"--user-data-dir={folder / 'profile'}", "--no-pdf-header-footer",
                         f"--print-to-pdf={pdf}", page.as_uri()],
@@ -70,9 +75,9 @@ a { color: #254f90; }
         pdf.replace(output)
 
 
-def make_report(source, event, request_id, day, refresh):
-    identity = hashlib.sha256(f"{source.account}\0{event.group_id}".encode()).hexdigest()
-    target = CACHE / identity / f"{day.isoformat()}.pdf"
+def report_pdf(source, group_id, request_id, day, refresh=False, *, progress=lambda message: None):
+    identity = hashlib.sha256(f"{source.account}\0{group_id}".encode()).hexdigest()
+    target = CACHE / identity / f"{day.isoformat()}-mobile.pdf"
     cutoff = time() - TTL
     for cached in CACHE.glob("*/*.pdf"):
         if cached.stat().st_mtime <= cutoff:
@@ -80,13 +85,30 @@ def make_report(source, event, request_id, day, refresh):
     if refresh:
         target.unlink(missing_ok=True)
     if target.is_file():
+        progress("命中缓存，使用已有 PDF")
         log.info("chat_summary_cache_hit", msg="使用聊天梳理缓存", request_id=str(request_id), day=str(day))
     else:
-        transcript = read_transcript(source, event.group_id, day, day)
+        progress("读取当天的完整聊天记录")
+        transcript = read_transcript(source, group_id, day, day)
+        progress("正在请求模型梳理")
         markdown = global_ai.summarize(transcript, str(request_id))
+        progress("模型已返回，正在生成 PDF")
         render_pdf(markdown, target)
         log.info("chat_summary_pdf_ready", msg="聊天梳理 PDF 已生成", request_id=str(request_id), day=str(day))
+    return target
+
+
+def report_filename(source, group_id, day):
+    details = source.conversation_details([group_id]).get(group_id, {})
+    name = (details.get("original_name") or "").strip() or group_id
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)[:50]
+    return f"群聊梳理-{name}-{day:%Y%m%d}.pdf"
+
+
+def make_report(source, event, request_id, day, refresh, *, progress=lambda message: None):
     from ...sender_jobs import stage_local_pdf
 
-    stage_local_pdf(request_id, target, f"群聊梳理-{day:%Y%m%d}.pdf")
+    target = report_pdf(source, event.group_id, request_id, day, refresh, progress=progress)
+    stage_local_pdf(request_id, target, report_filename(source, event.group_id, day))
+    progress("PDF 已就绪，等待手机发送")
     return {"type": "file", "asset_id": request_id}

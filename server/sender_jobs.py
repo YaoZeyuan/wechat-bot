@@ -207,12 +207,31 @@ def retry_sender_job(request_id: UUID, tasks: BackgroundTasks):
     return result
 
 
+@router.get("/history/{request_id}/pdf")
+def sender_history_pdf(request_id: UUID):
+    key = str(request_id)
+    with closing(database()) as conn:
+        retained = conn.execute(
+            "SELECT 1 FROM sender_history WHERE job_id=? AND source='chat_summary'", (key,),
+        ).fetchone()
+    path = root / "assets" / key / "asset.pdf"
+    if not retained or not path.is_file():
+        raise HTTPException(404, "梳理 PDF 尚未生成或已不可用")
+    from urllib.parse import quote
+
+    filename = json.loads(path.with_name("filename.json").read_text(encoding="utf-8"))
+    return Response(path.read_bytes(), media_type="application/pdf", headers={
+        "Content-Disposition": "inline; filename*=UTF-8''" + quote(filename, safe=""),
+        "Cache-Control": "no-store",
+    })
+
+
 @router.get("/history/{request_id}/ai")
 def sender_history_ai(request_id: UUID):
     key = str(request_id)
     with closing(database()) as conn:
         retained = conn.execute(
-            "SELECT 1 FROM sender_history WHERE job_id=? AND source='ai_chat'", (key,),
+            "SELECT 1 FROM sender_history WHERE job_id=? AND source IN ('ai_chat', 'chat_summary')", (key,),
         ).fetchone()
     if not retained:
         raise HTTPException(404, "AI 任务不存在")

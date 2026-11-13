@@ -145,7 +145,7 @@ def dispatch(source, automation, event, *, quotes=None):
 
     from fastapi import HTTPException
 
-    from .sender_jobs import Job, get_job, queue_job, run
+    from .sender_jobs import Job, get_job, queue_job, run, save
 
     legacy = automation.group_plugins(event.group_id)
     replies = []
@@ -201,13 +201,30 @@ def dispatch(source, automation, event, *, quotes=None):
                 text = f"AI 问答暂不可用：{exc}"
         messages = [{"type": "text", "text": text}]
         if plugin_id == chat_summary.PLUGIN_ID and summary:
+            job = Job(version=1, request_id=request_id, mode="send",
+                      target={"kind": "group", "id": event.group_id, "name": name},
+                      messages=[{"type": "file", "asset_id": request_id}])
+            result, inserted = queue_job(job, strict=False, source=plugin_id)
+            if not inserted:
+                continue
+            result["status"] = "running"
+
+            def progress(message):
+                result["steps"].append(message)
+                save(str(request_id), result)
+
+            progress(f"开始梳理 {summary[0]} 的聊天记录")
             try:
-                messages = [chat_summary.make_report(source, event, request_id, *summary)]
+                chat_summary.make_report(source, event, request_id, *summary, progress=progress)
             except (OSError, RuntimeError, ValueError, SourceError, chat_summary.subprocess.SubprocessError) as exc:
                 chat_summary.log.warning("chat_summary_failed", msg="聊天梳理失败",
                                          request_id=str(request_id), error_type=type(exc).__name__)
                 reason = str(exc) if isinstance(exc, (ai_chat.ChatError, SourceError)) else "无法生成或准备 PDF，请查看 Server 日志"
-                messages = [{"type": "text", "text": f"聊天梳理失败：{reason}"}]
+                result.update(status="failed", items=["failed"])
+                progress(f"聊天梳理失败：{reason}")
+            else:
+                run(job, result)
+            continue
         job = Job(
             version=1, request_id=request_id,
             mode="send", target={"kind": "group", "id": event.group_id, "name": name},

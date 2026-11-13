@@ -230,7 +230,7 @@ class Automation:
                 "SELECT enabled FROM group_plugins WHERE group_id=? AND plugin_id=?",
                 (event.group_id, rule.handler),
             ).fetchone()
-            enabled = bool(plugin["enabled"]) if plugin is not None else PLUGINS[rule.handler]["default_enabled"]
+            enabled = rule.handler in PLUGINS and (bool(plugin["enabled"]) if plugin is not None else PLUGINS[rule.handler]["default_enabled"])
             if not enabled:
                 return "unmatched"
             inserted = db.execute(

@@ -89,10 +89,22 @@ async def log_api_request(request: Request, call_next):
     status = 500
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(request_id=request_id)
+    request_body = None
+    response_body = None
     try:
+        if "json" in request.headers.get("content-type", ""):
+            request_body = (await request.body()).decode("utf-8", errors="replace")
         response = await call_next(request)
         status = response.status_code
         response.headers["X-Request-ID"] = request_id
+        content_type = response.headers.get("content-type", "")
+        if "json" in content_type and request.method != "HEAD":
+            chunks = [chunk async for chunk in response.body_iterator]
+            response_body = b"".join(chunks).decode("utf-8", errors="replace")
+            async def replay():
+                for chunk in chunks:
+                    yield chunk
+            response.body_iterator = replay()
         return response
     finally:
         route = request.scope.get("route")
@@ -103,6 +115,12 @@ async def log_api_request(request: Request, call_next):
             route=getattr(route, "path", "<unmatched>"),
             status=status,
             duration_ms=round((perf_counter() - started) * 1000, 1),
+            request_body=request_body,
+            response_body=response_body if not request.url.path.endswith("/ai") else None,
+            request_content_type=request.headers.get("content-type"),
+            request_bytes=request.headers.get("content-length"),
+            response_content_type=response.headers.get("content-type") if status != 500 else None,
+            response_bytes=response.headers.get("content-length") if status != 500 else None,
         )
         structlog.contextvars.clear_contextvars()
 app.add_middleware(

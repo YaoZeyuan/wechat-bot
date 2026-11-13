@@ -11,6 +11,18 @@ import type {
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
+export async function previewChatSummary(groupId: string, day: string) {
+  const response = await fetch(`${BASE}/reader/plugins/chat_summary/preview`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_id: groupId, day }),
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new Error(typeof body?.detail === 'string' ? body.detail : `预览失败（HTTP ${response.status}）`)
+  }
+  return response.blob()
+}
+
 export async function downloadChatTranscript(sessionId: string, start: string, end: string) {
   const query = new URLSearchParams({ session_id: sessionId, start, end })
   const response = await fetch(`${BASE}/reader/history/export?${query}`)
@@ -201,6 +213,7 @@ export const api = {
     request<SenderJobResult>('/sender/jobs', { method: 'POST', body: JSON.stringify(payload) }),
   senderJob: (id: string) => request<SenderJobResult>(`/sender/jobs/${id}`),
   senderHistoryAi: (id: string) => request<SenderAiLog[]>(`/sender/history/${id}/ai`),
+  senderHistoryPdf: (id: string) => `${BASE}/sender/history/${id}/pdf`,
   retrySenderJob: (id: string) =>
     request<{ request_id: string }>(`/sender/history/${id}/retry`, { method: 'POST' }),
   senderProgress: () => request<{ running: boolean; steps: string[] }>('/sender/progress'),

@@ -30,8 +30,9 @@ async function load(page: number) {
   try {
     records.value = await api.senderHistory(page)
     offset.value = page
-    if (selected.value && records.value.some(record => record.id === selected.value?.id)) {
-      await select(selected.value)
+    const current = records.value.find(record => record.id === selected.value?.id)
+    if (current) {
+      await select(current)
     } else {
       selected.value = undefined
       detail.value = undefined
@@ -55,7 +56,7 @@ async function select(record: SenderHistoryItem) {
   } catch (cause) {
     if (selected.value?.id === record.id) error.value = cause instanceof Error ? cause.message : String(cause)
   }
-  if (record.source === 'ai_chat' && selected.value?.id === record.id) {
+  if (['ai_chat', 'chat_summary'].includes(record.source) && selected.value?.id === record.id) {
     try {
       const logs = await api.senderHistoryAi(record.id)
       if (selected.value?.id === record.id) aiLogs.value = logs
@@ -63,6 +64,10 @@ async function select(record: SenderHistoryItem) {
       if (selected.value?.id === record.id) aiError.value = cause instanceof Error ? cause.message : String(cause)
     }
   }
+}
+
+function selectCard(record: SenderHistoryItem) {
+  if (!window.getSelection()?.toString()) void select(record)
 }
 
 async function retry() {
@@ -99,21 +104,30 @@ onMounted(() => void load(0))
         </div>
         <p v-if="!records.length && !busy">暂无发送任务。</p>
         <ul class="records">
-          <li v-for="record in records" :key="record.id">
-            <button type="button" :aria-pressed="selected?.id === record.id" @click="select(record)">
+          <li v-for="record in records" :key="record.id" class="record"
+            :class="{ active: selected?.id === record.id }" @click="selectCard(record)">
+            <div class="record-text">
               <strong>{{ record.target.name }}</strong>
               <span>{{ sources[record.source] ?? record.source }} · {{ statuses[record.status] ?? record.status }}</span>
               <small v-if="record.created_ms">{{ dateFormat.format(record.created_ms) }}</small>
-            </button>
+            </div>
+            <a-button size="small" type="text" :aria-pressed="selected?.id === record.id"
+              @click.stop="select(record)">查看详情</a-button>
           </li>
         </ul>
       </section>
       <section class="card">
         <h2>{{ selected?.target.name ?? '操作步骤' }}</h2>
+        <p v-if="selected" class="task-meta">
+          {{ sources[selected.source] ?? selected.source }} · {{ statuses[detail?.status ?? selected.status] ?? (detail?.status ?? selected.status) }}
+          <time v-if="selected.created_ms" :datetime="new Date(selected.created_ms).toISOString()">{{ dateFormat.format(selected.created_ms) }}</time>
+        </p>
+        <a v-if="selected?.source === 'chat_summary' && detail?.steps.includes('PDF 已就绪，等待手机发送')"
+          :href="api.senderHistoryPdf(selected.id)" target="_blank" rel="noopener">在新标签页打开 PDF</a>
         <a-button v-if="selected && detail" :disabled="busy || retrying || ['queued', 'running'].includes(detail.status)"
           @click="retryTarget = selected">重试任务</a-button>
         <p v-if="!selected">请先选择一条任务。</p>
-        <section v-if="selected?.source === 'ai_chat'">
+        <section v-if="selected && ['ai_chat', 'chat_summary'].includes(selected.source)">
           <h3>模型调用</h3>
           <p v-if="aiError">{{ aiError }}</p>
           <p v-else-if="aiLogs?.length === 0">当前 Server 日志中没有这条任务的模型记录。</p>
@@ -130,7 +144,7 @@ onMounted(() => void load(0))
               </details>
             </li>
           </ol>
-          <h3>手机发送步骤</h3>
+          <h3>执行步骤</h3>
         </section>
         <p v-else-if="detail && !detail.steps.length">暂无操作步骤。</p>
         <ol v-if="detail">
@@ -154,8 +168,11 @@ onMounted(() => void load(0))
 
 <style scoped>
 .records { list-style: none; padding: 0; }
-.records button { width: 100%; text-align: left; padding: 8px; border: 1px solid var(--color-border-2); background: var(--color-bg-2); color: var(--color-text-1); cursor: pointer; }
-.records button[aria-pressed="true"] { background: var(--color-fill-2); }
+.record { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; border: 1px solid var(--color-border-2); border-radius: 8px; background: var(--color-bg-2); cursor: pointer; }
+.record.active { background: var(--color-fill-2); }
+.record-text { user-select: text; cursor: text; overflow-wrap: anywhere; }
+.task-meta { margin: -8px 0 12px; color: var(--color-text-2); }
+.task-meta time { display: block; }
 .records span, .records small { display: block; }
 li { margin-block: 8px; }
 img { display: block; max-width: 100%; max-height: 65vh; }

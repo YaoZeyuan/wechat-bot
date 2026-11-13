@@ -10,11 +10,14 @@ import time
 import structlog
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 
 from .chat_transcript import read_transcript
 from . import global_ai
 from .plugin import ai_chat
+from .plugin import chat_summary
+from uuid import uuid4
+from urllib.parse import quote
 from pathlib import Path
 from typing import Literal
 from threading import Lock
@@ -54,6 +57,32 @@ def set_ai_chat_route(route_id: str, patch: ai_chat.RouteUpdate):
     except OSError:
         raise HTTPException(502, "无法保存 AI 问答配置") from None
     return get_ai_chat_routes()
+
+
+class SummaryPreview(BaseModel):
+    group_id: str = Field(min_length=1, max_length=256)
+    day: date
+
+
+@router.post("/plugins/chat_summary/preview")
+def preview_chat_summary(request: SummaryPreview):
+    if not any(group["group_id"] == request.group_id for group in automation.monitored_groups()):
+        raise HTTPException(404, "未找到所选监听群")
+    request_id = uuid4()
+    try:
+        source = history_source()
+        path = chat_summary.report_pdf(source, request.group_id, request_id, request.day)
+        filename = quote(chat_summary.report_filename(source, request.group_id, request.day), safe="")
+        pdf = path.read_bytes()
+    except (OSError, RuntimeError, ValueError, chat_summary.subprocess.SubprocessError) as exc:
+        log.warning("chat_summary_preview_failed", msg="聊天梳理预览失败",
+                    request_id=str(request_id), error_type=type(exc).__name__)
+        reason = str(exc) if isinstance(exc, (ai_chat.ChatError, SourceError)) else "无法生成 PDF，请查看 Server 日志"
+        raise HTTPException(502, reason) from None
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f"inline; filename*=UTF-8''{filename}",
+        "Cache-Control": "no-store",
+    })
 
 
 @router.get("/global-ai")

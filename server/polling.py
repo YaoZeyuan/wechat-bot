@@ -79,7 +79,6 @@ def poll_group(source, automation: Automation, group_id: str, source_id: str = "
                 dispatch_builtin(source, automation, event, quotes=row.get("quotes") or [])
             else:
                 dispatch_builtin(source, automation, event)
-                automation.dispatch(event)
     automation.save_cursor(cursor_key, next(iter(newer)))
     log.info("desktop_messages_processed", count=len(newer))
     return len(newer)

@@ -166,7 +166,7 @@ class AccessibilitySender:
 
             self.progress("已校验附件内容，正在打开微信系统分享")
             return self.share(user, target, mime, kind,
-                              ["--grant-read-uri-permission", "--eu", "android.intent.extra.STREAM", uri],
+                              ["--grant-read-uri-permission", "-d", uri, "--eu", "android.intent.extra.STREAM", uri],
                               filename=filename, group=group)
         finally:
             try:
@@ -202,8 +202,15 @@ class AccessibilitySender:
             raise SendError("Android 无法打开微信分享页面")
 
         prompted = False
+        woke_during_share = False
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
+            if not woke_during_share:
+                power = self.device.shell(["dumpsys", "power"], timeout=5)
+                if not re.search(r"\bmWakefulness=Awake\b", power):
+                    self.progress("等待分享页面时手机已息屏，正在重新唤醒")
+                    self.ensure_awake_and_talkback()
+                    woke_during_share = True
             active = self.foreground()
             if active and active.group(1) == user and active.group(2) == "com.tencent.mm":
                 if self.call("share_status")["ready"]:
@@ -213,7 +220,8 @@ class AccessibilitySender:
                 prompted = True
             time.sleep(1)
         else:
-            raise ShareRejected("等待微信分享页面超时，未发送消息")
+            foreground = active.group(2) if active else "无法识别"
+            raise ShareRejected(f"等待微信分享页面超时，未发送消息（前台应用：{foreground}）")
 
         self.progress("正在核对微信分享确认页上的唯一收件人")
         try:
