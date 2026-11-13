@@ -81,7 +81,7 @@ onMounted(load)
   <ReaderRules v-if="route.query.group" />
   <main v-else class="page">
     <header class="topbar">
-      <div><h1>群配置</h1><p class="sub">已启用 {{ groups.filter(group => group.enabled).length }} / 10 个群机器人</p></div>
+      <div><h1>群配置</h1><p class="sub">已启用 {{ groups.filter(group => group.enabled).length }} / 50 个群机器人</p></div>
       <a-button type="primary" :disabled="loading" @click="adding = true; query = ''; search()">添加群</a-button>
     </header>
     <a-alert v-if="error" type="error">{{ error }} <a-button @click="load">重试</a-button></a-alert>

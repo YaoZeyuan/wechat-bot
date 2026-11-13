@@ -13,7 +13,7 @@ from .plugins import HANDLERS, PLUGINS, PluginActionError
 from .reply import ContractModel, MessageEvent, NonEmpty, SendTask
 
 log = structlog.get_logger("wechat_bot.automation")
-MAX_MONITORED_GROUPS = 10
+MAX_MONITORED_GROUPS = 50
 
 
 class GroupLimitError(ValueError):
@@ -124,7 +124,7 @@ class Automation:
             if enabled and db.execute(
                 "SELECT COUNT(*) FROM monitored_groups WHERE enabled=1 AND group_id<>?", (group_id,),
             ).fetchone()[0] >= MAX_MONITORED_GROUPS:
-                raise GroupLimitError("最多同时监听 10 个群，请先暂停一个群")
+                raise GroupLimitError(f"最多同时监听 {MAX_MONITORED_GROUPS} 个群，请先暂停一个群")
             db.execute(
                 "INSERT INTO monitored_groups VALUES (?, ?, ?) ON CONFLICT(group_id) "
                 "DO UPDATE SET name=excluded.name, enabled=excluded.enabled", (group_id, name, enabled),

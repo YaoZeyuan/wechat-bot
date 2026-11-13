@@ -168,7 +168,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
           <a-button :type="monitoring.enabled ? 'secondary' : 'primary'" :disabled="busy || (!monitoring.enabled && !enabledCount)"
             @click="toggleMonitoring">{{ monitoring.enabled ? '停止监听' : '启动监听' }}</a-button>
         </form>
-        <p class="muted">当前每 {{ monitoring.interval_seconds }} 秒读取一次 · 已启用 {{ enabledCount }} / 10 个群</p>
+        <p class="muted">当前每 {{ monitoring.interval_seconds }} 秒读取一次 · 已启用 {{ enabledCount }} / 50 个群</p>
         <p v-if="monitoring.last_success_at" class="muted">最近成功读取 {{ new Date(monitoring.last_success_at).toLocaleString() }}</p>
         <a-alert v-if="monitoring.error" type="error">{{ monitoring.error }}</a-alert>
       </template>
