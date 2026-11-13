@@ -366,19 +366,17 @@ public final class Bridge extends AccessibilityService {
     }
 
     private List<AccessibilityNodeInfo> groupSearchRows(String target) throws Exception {
-        Rect heading = new Rect();
-        List<AccessibilityNodeInfo> headings = matching(named("群聊"));
-        boolean frequent = headings.isEmpty();
-        if (frequent) headings = matching(named("最常使用"));
-        if (headings.size() != 1) return new ArrayList<>();
-        headings.get(0).getBoundsInScreen(heading);
+        Rect search = new Rect();
+        List<AccessibilityNodeInfo> inputs = matching(n -> n.isEditable() && named(target).test(n));
+        if (inputs.size() != 1) return new ArrayList<>();
+        inputs.get(0).getBoundsInScreen(search);
         int bottom = getResources().getDisplayMetrics().heightPixels;
         for (AccessibilityNodeInfo node : matching(n -> named("搜索网络结果").test(n)
                 || named("聊天记录").test(n) || named("联系人").test(n)
                 || named("公众号").test(n) || named("搜一搜").test(n))) {
             Rect bounds = new Rect();
             node.getBoundsInScreen(bounds);
-            if (bounds.top >= heading.bottom) bottom = Math.min(bottom, bounds.top);
+            if (bounds.top >= search.bottom) bottom = Math.min(bottom, bounds.top);
         }
         final int sectionBottom = bottom;
         java.util.regex.Pattern title = java.util.regex.Pattern.compile(
@@ -389,17 +387,9 @@ public final class Bridge extends AccessibilityService {
                     || title.matcher(value(n.getContentDescription())).matches()))) {
             AccessibilityNodeInfo row = clickable(node);
             if (row == null || row.isEditable() || isWebSearch(row)) continue;
-            if (frequent) {
-                List<AccessibilityNodeInfo> card = new ArrayList<>();
-                collect(row, card);
-                boolean groupCard = card.stream().anyMatch(n ->
-                    value(n.getText()).toString().matches("群聊名[:：].*")
-                    || value(n.getContentDescription()).toString().matches("群聊名[:：].*"));
-                if (!groupCard) continue;
-            }
             Rect bounds = new Rect();
             node.getBoundsInScreen(bounds);
-            if (bounds.top >= heading.bottom && bounds.bottom <= sectionBottom) rows.add(row);
+            if (bounds.top >= search.bottom && bounds.bottom <= sectionBottom) rows.add(row);
         }
         return new ArrayList<>(rows);
     }
