@@ -170,7 +170,6 @@ public final class Bridge extends AccessibilityService {
         List<AccessibilityNodeInfo> candidates = mentionRows(nickname);
         if (candidates.isEmpty() && !nickname.equals(username)) {
             candidates = mentionRows(username);
-            require(candidates.size() <= 1, "找到多个同名 @成员，无法确认：" + username);
         }
         require(!candidates.isEmpty(), "未找到匹配的 @成员：" + nickname + " / " + username);
         AccessibilityNodeInfo row = candidates.get(0);
