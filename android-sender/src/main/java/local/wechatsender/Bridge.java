@@ -442,18 +442,34 @@ public final class Bridge extends AccessibilityService {
 
     private String pageShape(String target) {
         Set<String> markers = new LinkedHashSet<>();
+        Set<String> header = new LinkedHashSet<>();
+        int headerBottom = getResources().getDisplayMetrics().heightPixels * 15 / 100;
         for (AccessibilityNodeInfo node : nodes()) {
             boolean nameMatch = value(node.getText()).toString().contains(target)
                 || value(node.getContentDescription()).toString().contains(target);
             String type = value(node.getClassName()).toString();
+            Rect bounds = new Rect();
+            node.getBoundsInScreen(bounds);
+            CharSequence text = value(node.getText());
+            CharSequence description = value(node.getContentDescription());
+            if (!node.isEditable() && !bounds.isEmpty() && bounds.top >= 0 && bounds.top < headerBottom
+                    && (text.length() > 0 || description.length() > 0) && header.size() < 12) {
+                header.add(type + "/" + node.getViewIdResourceName() + "/" + bounds.toShortString()
+                    + "/文本=" + diagnosticLabel(text) + "/描述=" + diagnosticLabel(description));
+            }
             if (nameMatch || node.isEditable() || type.endsWith("EditText")) {
-                Rect bounds = new Rect();
-                node.getBoundsInScreen(bounds);
                 markers.add((nameMatch ? "目标" : "输入") + "/" + type + "/"
                     + node.getViewIdResourceName() + "/y=" + bounds.top);
             }
         }
-        return String.join(", ", markers);
+        return String.join(", ", markers) + "；顶部候选节点：" + (header.isEmpty() ? "无" : String.join(" | ", header));
+    }
+
+    private static String diagnosticLabel(CharSequence value) {
+        String label = value.toString();
+        return JSONObject.quote(label.substring(0, Math.min(100, label.length())))
+            .replace("\uFFFC", "\\uFFFC").replace("\u200B", "\\u200B")
+            .replace("\uFE0F", "\\uFE0F");
     }
 
     private List<AccessibilityNodeInfo> nodes() {
