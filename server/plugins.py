@@ -26,7 +26,5 @@ PLUGINS = {
     ai_chat.PLUGIN_ID: ai_chat.METADATA,
     chat_summary.PLUGIN_ID: chat_summary.METADATA,
     self_intro.PLUGIN_ID: self_intro.METADATA,
-    "daily_activity": {"name": "活跃日榜", "description": "统计北京时间当天本群发言数，回复前十名", "default_enabled": False, "version": "1.0.0", "capability": "手机发送"},
-    "total_activity": {"name": "活跃总榜", "description": "按本地历史累计发言数从高到低排列，最多展示 20 人", "default_enabled": False, "version": "1.0.0", "capability": "手机发送"},
-    "total_lurkers": {"name": "潜水总榜", "description": "仅统计当前群成员，累计发言数从低到高排列，含零发言，最多展示 20 人", "default_enabled": False, "version": "1.0.0", "capability": "手机发送"},
+    "activity_stats": {"name": "活跃统计", "description": "支持活跃日榜、活跃总榜和潜水总榜", "default_enabled": False, "version": "1.0.0", "capability": "手机发送"},
 }

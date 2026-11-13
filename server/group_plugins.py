@@ -17,7 +17,8 @@ PATH = Path(__file__).resolve().parents[1] / "local-data" / "group-plugins.json"
 LOCK = Lock()
 BEIJING = timezone(timedelta(hours=8))
 RANKINGS = {"daily_activity": "活跃日榜", "total_activity": "活跃总榜", "total_lurkers": "潜水总榜"}
-BUILTINS = (*RANKINGS, self_intro.PLUGIN_ID)
+ACTIVITY_STATS = "activity_stats"
+BUILTINS = (ACTIVITY_STATS, self_intro.PLUGIN_ID)
 
 
 class Settings(BaseModel):
@@ -34,9 +35,12 @@ def read_all():
 
 def config(group_id, plugin_id, legacy):
     with LOCK:
-        value = read_all().get(group_id, {}).get(plugin_id)
+        stored = read_all().get(group_id, {})
+        value = stored.get(plugin_id)
     if value is not None:
         return Settings.model_validate(value)
+    if plugin_id == ACTIVITY_STATS:
+        return Settings(enabled=any(stored.get(key, {}).get("enabled", legacy.get(key, False)) for key in RANKINGS))
     return Settings(enabled=legacy.get(plugin_id, False))
 
 
@@ -136,7 +140,8 @@ def activity_board(source, event, rows, *, start, limit, members=None):
     for index, user in enumerate(top, 1):
         name = details.get(user, {}).get("original_name") or user
         nickname = group_names.get(user) or name
-        lines.append(f"{index}. 【{nickname}】({name})-{counts[user]}条")
+        display = nickname if nickname == name else f"{nickname}-{name}"
+        lines.append(f"{index}. {display}-{counts[user]}条")
     return "\n".join(lines)
 
 
@@ -164,17 +169,17 @@ def dispatch(source, automation, event, *, quotes=None):
         intro = config(event.group_id, self_intro.PLUGIN_ID, legacy)
         if intro.enabled and intro.intro_reply and self_intro.match(event.text, (intro.assistant_name or "").strip()):
             replies.append((self_intro.PLUGIN_ID, intro.intro_reply))
-    for plugin_id, keyword in RANKINGS.items():
-        if quotes is not None or event.text != keyword or not config(event.group_id, plugin_id, legacy).enabled:
+    for behavior, keyword in RANKINGS.items():
+        if quotes is not None or event.text != keyword or not config(event.group_id, ACTIVITY_STATS, legacy).enabled:
             continue
-        if plugin_id == "daily_activity":
+        if behavior == "daily_activity":
             text = daily_activity(source, event)
         else:
             try:
-                text = total_activity(source, event, lurkers=plugin_id == "total_lurkers")
+                text = total_activity(source, event, lurkers=behavior == "total_lurkers")
             except SourceError as exc:
                 text = f"{keyword}暂不可用：{exc}"
-        replies.append((plugin_id, text))
+        replies.append((ACTIVITY_STATS, text))
     question = ai_chat.trigger(event.text) if legacy.get(ai_chat.PLUGIN_ID, False) else None
     if question:
         replies.append((ai_chat.PLUGIN_ID, ""))
@@ -185,7 +190,8 @@ def dispatch(source, automation, event, *, quotes=None):
     details = contacts.get(event.group_id, {})
     name = details.get("remark") or details.get("original_name") or event.group_id
     for plugin_id, text in replies:
-        request_id = uuid5(NAMESPACE_URL, f"wechat-bot:{event.group_id}:{event.message_id}:{plugin_id}")
+        job_key = next(key for key, keyword in RANKINGS.items() if keyword == event.text) if plugin_id == ACTIVITY_STATS else plugin_id
+        request_id = uuid5(NAMESPACE_URL, f"wechat-bot:{event.group_id}:{event.message_id}:{job_key}")
         if plugin_id in {ai_chat.PLUGIN_ID, chat_summary.PLUGIN_ID}:
             try:
                 get_job(request_id)
