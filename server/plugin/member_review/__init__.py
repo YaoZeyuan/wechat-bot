@@ -89,5 +89,7 @@ def reply(source, event, request_id, trigger, settings):
     answer, model, seconds = global_ai.generate(prompt, request_id)
     if action == "赞美":
         answer += "\n\n💖 内容是AI生成，但赞美你的心是真诚的"
+    elif action == "锐评":
+        answer += "\n\n💖 内容是AI生成，但对你的关心是真诚的"
     return {"type": "text", "mentions": [mention],
             "text": f"\n{answer}\n\n🕛模型:{model}; 耗时{int(seconds + 0.5)} 秒"}
