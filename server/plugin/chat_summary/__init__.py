@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import secrets
 import shutil
 import subprocess
 from datetime import datetime, timedelta
@@ -21,6 +22,7 @@ METADATA = {"name": "聊天梳理", "description": "按北京时间梳理指定�
             "default_enabled": False, "version": "1.0.0", "capability": "模型 API、PDF、手机发送"}
 CACHE = Path(__file__).resolve().parents[3] / "local-data" / "chat-summary"
 TTL = 30 * 86400
+MAX_SINGLE_PAGE_HEIGHT = 12000
 log = structlog.get_logger("wechat_bot.chat_summary")
 
 
@@ -51,6 +53,7 @@ def render_pdf(markdown, output, *, html_output=None):
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
 <style>
 @page { size: 393px 852px; margin: 22px 20px 26px; }
+@media screen { body { width: 353px; } }
 body { margin: 0; font: 16px/1.65 "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #172033;
 overflow-wrap: anywhere; print-color-adjust: exact; }
 h1,h2,h3 { break-after: avoid; line-height: 1.4; color: #18315b; }
@@ -63,11 +66,30 @@ table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 th,td { border: 1px solid #d7deea; padding: .3em .5em; }
 pre { white-space: pre-wrap; background: #f0f3f7; padding: .6em; }
 a { color: #254f90; }
-</style><body>""" + body + "</body></html>", encoding="utf-8")
+</style><body><main style="display: flow-root">""" + body + "</main></body></html>", encoding="utf-8")
         if html_output is not None:
             shutil.copyfile(page, html_output)
-        subprocess.run([browser, "--headless", "--no-first-run", "--disable-background-networking",
-                        f"--user-data-dir={folder / 'profile'}", "--no-pdf-header-footer",
+        browser_args = [browser, "--headless", "--no-first-run", "--disable-background-networking",
+                        f"--user-data-dir={folder / 'profile'}"]
+        html = page.read_text(encoding="utf-8")
+        nonce = secrets.token_hex(16)
+        measurement = html.replace("default-src 'none';", f"default-src 'none'; script-src 'nonce-{nonce}';", 1)
+        measurement += (
+            f'<script nonce="{nonce}">document.fonts.ready.then(() => {{'
+            "document.body.dataset.printHeight = Math.ceil(document.querySelector('main').getBoundingClientRect().height);"
+            "});</script>"
+        )
+        page.write_text(measurement, encoding="utf-8")
+        result = subprocess.run([*browser_args, "--dump-dom", "--virtual-time-budget=1000", page.as_uri()],
+                                capture_output=True, timeout=45, check=True)
+        match = re.search(rb'<body data-print-height="(\d+)"', result.stdout)
+        if not match:
+            raise RuntimeError("浏览器未返回正文高度")
+        height = int(match[1]) + 52  # Top and bottom margins plus rounding allowance.
+        if height <= MAX_SINGLE_PAGE_HEIGHT:
+            html = html.replace("393px 852px", f"393px {height}px", 1)
+        page.write_text(html, encoding="utf-8")
+        subprocess.run([*browser_args, "--no-pdf-header-footer",
                         f"--print-to-pdf={pdf}", page.as_uri()],
                        capture_output=True, timeout=75, check=True)
         if not pdf.is_file() or pdf.stat().st_size == 0:
@@ -77,7 +99,7 @@ a { color: #254f90; }
 
 def report_pdf(source, group_id, request_id, day, refresh=False, *, progress=lambda message: None):
     identity = hashlib.sha256(f"{source.account}\0{group_id}".encode()).hexdigest()
-    target = CACHE / identity / f"{day.isoformat()}-mobile.pdf"
+    target = CACHE / identity / f"{day.isoformat()}-mobile-long.pdf"
     cutoff = time() - TTL
     for cached in CACHE.glob("*/*.pdf"):
         if cached.stat().st_mtime <= cutoff:
