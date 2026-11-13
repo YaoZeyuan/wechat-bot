@@ -5,7 +5,7 @@ import os
 import secrets
 import shutil
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime
 from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -32,10 +32,10 @@ def command(text, timestamp_ms):
     if count:
         return int(count[1]), False
     matched = re.fullmatch(r"(重新梳理|梳理)(?:\s*([0-9]{8}))?", text.strip())
-    if not matched or (matched[1] == "重新梳理" and not matched[2]):
+    if not matched:
         return None
     day = (datetime.strptime(matched[2], "%Y%m%d").date() if matched[2]
-           else datetime.fromtimestamp(timestamp_ms / 1000, BEIJING).date() - timedelta(days=1))
+           else datetime.fromtimestamp(timestamp_ms / 1000, BEIJING).date())
     return day, matched[1] == "重新梳理"
 
 
