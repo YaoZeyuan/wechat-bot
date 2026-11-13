@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Switch as ASwitch, Card as ACard } from '@arco-design/web-vue'
+import OrderAdmins from './OrderAdmins.vue'
 import PluginSettings from './PluginSettings.vue'
 import AiChatSettings from './AiChatSettings.vue'
 import SummaryPreview from './SummaryPreview.vue'
@@ -232,6 +233,8 @@ onUnmounted(() => window.clearInterval(refreshTimer))
               <p>{{ detailPlugin.description }}</p>
               <PluginSettings v-if="detailPlugin.fields?.length" :key="groupId + ':' + detailPlugin.id"
                 :plugin="detailPlugin" :group-id="groupId" @saved="updatePlugin" />
+              <OrderAdmins v-if="detailPlugin.id === 'group_order'" :key="groupId" :group-id="groupId"
+                :plugin="detailPlugin" @saved="updatePlugin" />
               <AiChatSettings v-if="detailPlugin.id === 'ai_chat'" :key="groupId" :group-id="groupId" />
               <SummaryPreview v-if="detailPlugin.id === 'chat_summary'" :group-id="groupId" />
             </template>

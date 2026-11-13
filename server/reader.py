@@ -475,6 +475,23 @@ def list_group_plugins(group_id: str) -> list[dict]:
     ]
 
 
+@router.get("/monitored-groups/{group_id}/members")
+def list_group_members(group_id: str) -> list[dict]:
+    source = history_source()
+    try:
+        ids = sorted(source.group_members(group_id))
+        names = source.group_nicknames(group_id)
+        contacts = {}
+        for start in range(0, len(ids), 100):
+            contacts.update(source.conversation_details(ids[start:start + 100]))
+    except SourceError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    return sorted([
+        {"id": user_id, "name": names.get(user_id) or contacts.get(user_id, {}).get("original_name") or user_id}
+        for user_id in ids
+    ], key=lambda member: (member["name"].casefold(), member["id"]))
+
+
 @router.put("/monitored-groups/{group_id}/plugins/{plugin_id}")
 def update_group_plugin(group_id: str, plugin_id: str, settings: GroupPluginSettings) -> dict:
     if plugin_id not in PLUGINS or not any(item["group_id"] == group_id for item in automation.monitored_groups()):
@@ -489,6 +506,13 @@ def update_group_plugin(group_id: str, plugin_id: str, settings: GroupPluginSett
             name = (name_value or "").strip()
             if not name or name.startswith("@") or not (reply_value or "").strip():
                 raise HTTPException(422, "请输入助手名字（无需填写 @）和介绍文案")
+        if plugin_id == "group_order" and "admin_ids" in settings.model_fields_set:
+            try:
+                members = history_source().group_members(group_id)
+            except SourceError as exc:
+                raise HTTPException(502, str(exc)) from exc
+            if set(settings.admin_ids) - members:
+                raise HTTPException(422, "管理员必须是当前群成员")
         builtin_plugins.save(group_id, plugin_id, settings)
     else:
         automation.set_group_plugin(group_id, plugin_id, settings.enabled)

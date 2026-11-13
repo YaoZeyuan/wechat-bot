@@ -16,7 +16,7 @@ const sources: Record<string, string> = {
   manual: '手动发送', fixed_reply: '测试', daily_activity: '活跃日榜',
   total_activity: '活跃总榜', total_lurkers: '潜水总榜',
   activity_stats: '活跃统计',
-  ai_chat: 'AI 问答', self_intro: '自我介绍', member_review: '群友评价', chat_summary: '聊天梳理', retry: '重试发送',
+  ai_chat: 'AI 问答', self_intro: '自我介绍', member_review: '群友评价', group_order: '秩序管理', chat_summary: '聊天梳理', retry: '重试发送',
 }
 const statuses: Record<string, string> = {
   queued: '排队中', running: '执行中', completed: '完成', failed: '失败', uncertain: '待核对',

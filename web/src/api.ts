@@ -119,6 +119,7 @@ export interface ConversationDetails {
 }
 
 export interface GroupPlugin {
+  admin_ids?: string[]
   global_enabled?: boolean
   group?: string
   order?: number
@@ -248,9 +249,11 @@ export const api = {
     request<ConversationDetails>(`/reader/history/details?${new URLSearchParams({ session_id })}`),
   groupPlugins: (groupId: string) =>
     request<GroupPlugin[]>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins`),
-  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean, assistant_name?: string | null, intro_reply?: string | null, history_count?: number, max_chars?: number) =>
+  groupMembers: (groupId: string) => request<{ id: string; name: string }[]>(
+    `/reader/monitored-groups/${encodeURIComponent(groupId)}/members`),
+  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean, assistant_name?: string | null, intro_reply?: string | null, history_count?: number, max_chars?: number, admin_ids?: string[]) =>
     request<GroupPlugin>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins/${encodeURIComponent(pluginId)}`, {
-      method: 'PUT', body: JSON.stringify({ enabled, assistant_name, intro_reply, history_count, max_chars }),
+      method: 'PUT', body: JSON.stringify({ enabled, assistant_name, intro_reply, history_count, max_chars, admin_ids }),
     }),
   monitoredGroups: () => request<MonitoredGroup[]>('/reader/monitored-groups'),
   deleteMonitoredGroup: (id: string) =>
