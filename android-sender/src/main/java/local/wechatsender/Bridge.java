@@ -140,7 +140,7 @@ public final class Bridge extends AccessibilityService {
             AccessibilityNodeInfo send = unique(named("发送"), "发送按钮");
             clicked[0] = true;
             click(send);
-            pause();
+        pause();
             require(chatReady(target), "发送后会话标题未匹配");
             require(matching(n -> !n.isEditable() && expected.contentEquals(value(n.getText()))).size() > before,
                 "已点击发送，但未核对到完整文本");
@@ -165,20 +165,27 @@ public final class Bridge extends AccessibilityService {
         List<AccessibilityNodeInfo> search = matching(AccessibilityNodeInfo::isEditable);
         if (search.isEmpty()) {
             click(unique(named("搜索"), "@成员搜索入口"));
-            pause();
+        pause();
         }
         setText(unique(AccessibilityNodeInfo::isEditable, "@成员搜索框"), nickname);
+        Set<AccessibilityNodeInfo> rows = new LinkedHashSet<>();
         for (AccessibilityNodeInfo candidate : matching(n -> !n.isEditable() && named(nickname).test(n))) {
             AccessibilityNodeInfo row = clickable(candidate);
-            if (row == null || (!nickname.equals(username) && !containsLabel(row, username))) continue;
-            click(row);
-            pause();
-            require(chatReady(target), "@成员选择后未返回目标群");
-            String after = value(unique(AccessibilityNodeInfo::isEditable, "聊天输入框").getText()).toString();
-            require(after.startsWith(before + "@") && after.length() > before.length() + 1, "@成员未写入输入框");
-            return;
+            if (row != null && !row.isEditable()) rows.add(row);
         }
-        throw new IOException("未找到匹配的 @成员：" + nickname + " / " + username);
+        List<AccessibilityNodeInfo> verified = new ArrayList<>();
+        for (AccessibilityNodeInfo row : rows) {
+            if (containsLabel(row, username)) verified.add(row);
+        }
+        List<AccessibilityNodeInfo> candidates = verified.isEmpty() ? new ArrayList<>(rows) : verified;
+        require(!candidates.isEmpty(), "未找到匹配的 @成员：" + nickname + " / " + username);
+        require(candidates.size() == 1, "找到多个同名 @成员，无法确认：" + nickname + " / " + username);
+        AccessibilityNodeInfo row = candidates.get(0);
+        click(row);
+        pause();
+        require(chatReady(target), "@成员选择后未返回目标群");
+        String after = value(unique(AccessibilityNodeInfo::isEditable, "聊天输入框").getText()).toString();
+        require(after.startsWith(before + "@") && after.length() > before.length() + 1, "@成员未写入输入框");
     }
 
     private static boolean containsLabel(AccessibilityNodeInfo node, String label) {
@@ -262,7 +269,7 @@ public final class Bridge extends AccessibilityService {
         clicked[0] = true;
         click(send);
         for (int attempt = 0; attempt < 8; attempt++) {
-            pause();
+        pause();
             AccessibilityNodeInfo stay = sentConfirmation();
             if (stay != null) {
                 try { click(stay); }
@@ -325,7 +332,7 @@ public final class Bridge extends AccessibilityService {
             require(!nodes().isEmpty(), "无障碍未读到前台微信控件");
             require(performGlobalAction(GLOBAL_ACTION_BACK), "无法返回聊天首页");
             attempts++;
-            pause();
+        pause();
         }
         require(home(), "无法确认聊天首页");
         return attempts;
@@ -337,13 +344,13 @@ public final class Bridge extends AccessibilityService {
         require(direct.size() <= 1, "首页有多个同名会话");
         if (direct.size() == 1) {
             click(direct.get(0));
-            pause();
+        pause();
             return;
         }
         List<AccessibilityNodeInfo> folded = matching(named("折叠的聊天"));
         if (folded.size() == 1) {
             click(folded.get(0));
-            pause();
+        pause();
             List<AccessibilityNodeInfo> groups = conversationRows(target);
             require(groups.size() <= 1, "折叠列表有多个同名会话");
             if (groups.size() == 1) {
@@ -352,7 +359,7 @@ public final class Bridge extends AccessibilityService {
                 return;
             }
             require(performGlobalAction(GLOBAL_ACTION_BACK), "无法退出折叠列表");
-            pause();
+        pause();
             require(home(), "无法返回聊天首页");
         }
         click(unique(named("搜索"), "首页搜索入口"));
@@ -361,7 +368,7 @@ public final class Bridge extends AccessibilityService {
         pause();
         List<AccessibilityNodeInfo> results = group ? groupSearchRows(target) : conversationRows(target);
         for (int attempt = 0; group && results.isEmpty() && attempt < 4; attempt++) {
-            pause();
+        pause();
             results = groupSearchRows(target);
         }
         if (group) require(results.size() == 1, "搜索页本地群聊匹配数为 " + results.size());
