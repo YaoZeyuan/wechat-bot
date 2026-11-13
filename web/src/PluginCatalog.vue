@@ -20,13 +20,15 @@ const filtered = computed(() => {
 const active = computed(() => plugins.value.find(plugin => plugin.id === route.query.plugin) ?? filtered.value[0])
 const saving = ref(false)
 const saved = ref(false)
-const draft = ref({ global_enabled: true, enabled: false, assistant_name: '', intro_reply: '' })
+const draft = ref({ global_enabled: true, enabled: false, assistant_name: '', intro_reply: '', history_count: 300, max_chars: 300 })
 watch(active, plugin => {
   draft.value = {
     global_enabled: plugin?.global_enabled ?? true,
     enabled: plugin?.default_enabled ?? false,
     assistant_name: plugin?.assistant_name ?? '',
     intro_reply: plugin?.intro_reply ?? '',
+    history_count: plugin?.history_count ?? 300,
+    max_chars: plugin?.max_chars ?? 300,
   }
   saved.value = false
 })
@@ -112,7 +114,9 @@ onMounted(load)
             <p>尚未保存本群参数的群会使用这些值。</p>
             <label v-for="field in active.fields" :key="field.key" class="parameter">
               {{ field.label }}
-              <a-textarea v-if="field.type === 'textarea'" v-model="draft[field.key]" :max-length="field.max_length" :disabled="saving" />
+              <input v-if="field.key === 'history_count' || field.key === 'max_chars'"
+                v-model.number="draft[field.key]" type="number" min="1" required :disabled="saving" />
+              <a-textarea v-else-if="field.type === 'textarea'" v-model="draft[field.key]" :max-length="field.max_length" :disabled="saving" />
               <a-input v-else v-model="draft[field.key]" :max-length="field.max_length" :disabled="saving" />
             </label>
           </template>

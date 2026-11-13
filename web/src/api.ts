@@ -130,7 +130,9 @@ export interface GroupPlugin {
   capability: string
   assistant_name?: string | null
   intro_reply?: string | null
-  fields?: { key: 'assistant_name' | 'intro_reply'; label: string; type: 'input' | 'textarea';
+  history_count?: number
+  max_chars?: number
+  fields?: { key: 'assistant_name' | 'intro_reply' | 'history_count' | 'max_chars'; label: string; type: 'input' | 'textarea' | 'number';
     max_length: number; placeholder?: string; description?: string }[]
 }
 
@@ -238,7 +240,7 @@ export const api = {
     request<SendResult>('/sender/send', { method: 'POST', body: JSON.stringify(payload) }),
   pluginCatalog: () => request<(Omit<GroupPlugin, 'enabled'> & { default_enabled: boolean })[]>('/reader/plugins'),
   savePluginDefaults: (pluginId: string, settings: { global_enabled: boolean; enabled: boolean;
-    assistant_name?: string | null; intro_reply?: string | null }) =>
+    assistant_name?: string | null; intro_reply?: string | null; history_count?: number; max_chars?: number }) =>
     request<Omit<GroupPlugin, 'enabled'> & { default_enabled: boolean }>(`/reader/plugins/${encodeURIComponent(pluginId)}`, {
       method: 'PUT', body: JSON.stringify(settings),
     }),
@@ -246,9 +248,9 @@ export const api = {
     request<ConversationDetails>(`/reader/history/details?${new URLSearchParams({ session_id })}`),
   groupPlugins: (groupId: string) =>
     request<GroupPlugin[]>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins`),
-  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean, assistant_name?: string | null, intro_reply?: string | null) =>
+  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean, assistant_name?: string | null, intro_reply?: string | null, history_count?: number, max_chars?: number) =>
     request<GroupPlugin>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins/${encodeURIComponent(pluginId)}`, {
-      method: 'PUT', body: JSON.stringify({ enabled, assistant_name, intro_reply }),
+      method: 'PUT', body: JSON.stringify({ enabled, assistant_name, intro_reply, history_count, max_chars }),
     }),
   monitoredGroups: () => request<MonitoredGroup[]>('/reader/monitored-groups'),
   deleteMonitoredGroup: (id: string) =>

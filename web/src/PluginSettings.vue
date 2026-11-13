@@ -25,7 +25,7 @@ async function save() {
   error.value = ''
   try {
     const plugin = await api.saveGroupPlugin(props.groupId, draft.value.id, draft.value.enabled,
-      draft.value.assistant_name, draft.value.intro_reply)
+      draft.value.assistant_name, draft.value.intro_reply, draft.value.history_count, draft.value.max_chars)
     emit('saved', plugin)
     await Promise.resolve()
     feedback.value = '配置已保存'
@@ -42,7 +42,9 @@ async function save() {
     <form @submit.prevent="save">
       <div v-for="field in plugin.fields" :key="field.key" class="settings-row field">
         <label :for="`plugin-${field.key}`">{{ field.label }}<small v-if="field.description">{{ field.description }}</small></label>
-        <a-textarea v-if="field.type === 'textarea'" :id="`plugin-${field.key}`" :model-value="draft[field.key] ?? ''"
+        <input v-if="field.key === 'history_count' || field.key === 'max_chars'"
+          :id="`plugin-${field.key}`" v-model.number="draft[field.key]" type="number" min="1" required :disabled="busy" />
+        <a-textarea v-else-if="field.type === 'textarea'" :id="`plugin-${field.key}`" :model-value="draft[field.key] ?? ''"
           :max-length="field.max_length" :auto-size="{ minRows: 3, maxRows: 9 }" :disabled="busy"
           @update:model-value="draft[field.key] = $event" />
         <a-input v-else :id="`plugin-${field.key}`" :model-value="draft[field.key] ?? ''"

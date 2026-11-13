@@ -16,7 +16,7 @@ const sources: Record<string, string> = {
   manual: '手动发送', fixed_reply: '测试', daily_activity: '活跃日榜',
   total_activity: '活跃总榜', total_lurkers: '潜水总榜',
   activity_stats: '活跃统计',
-  ai_chat: 'AI 问答', self_intro: '自我介绍', chat_summary: '聊天梳理', retry: '重试发送',
+  ai_chat: 'AI 问答', self_intro: '自我介绍', member_review: '群友评价', chat_summary: '聊天梳理', retry: '重试发送',
 }
 const statuses: Record<string, string> = {
   queued: '排队中', running: '执行中', completed: '完成', failed: '失败', uncertain: '待核对',
@@ -57,7 +57,7 @@ async function select(record: SenderHistoryItem) {
   } catch (cause) {
     if (selected.value?.id === record.id) error.value = cause instanceof Error ? cause.message : String(cause)
   }
-  if (['ai_chat', 'chat_summary'].includes(record.source) && selected.value?.id === record.id) {
+  if (['ai_chat', 'chat_summary', 'member_review'].includes(record.source) && selected.value?.id === record.id) {
     try {
       const logs = await api.senderHistoryAi(record.id)
       if (selected.value?.id === record.id) aiLogs.value = logs
@@ -128,7 +128,7 @@ onMounted(() => void load(0))
         <a-button v-if="selected && detail" :disabled="busy || retrying || ['queued', 'running'].includes(detail.status)"
           @click="retryTarget = selected">重试任务</a-button>
         <p v-if="!selected">请先选择一条任务。</p>
-        <section v-if="selected && ['ai_chat', 'chat_summary'].includes(selected.source)">
+        <section v-if="selected && ['ai_chat', 'chat_summary', 'member_review'].includes(selected.source)">
           <h3>模型调用</h3>
           <p v-if="aiError">{{ aiError }}</p>
           <p v-else-if="aiLogs?.length === 0">当前 Server 日志中没有这条任务的模型记录。</p>

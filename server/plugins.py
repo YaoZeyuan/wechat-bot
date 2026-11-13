@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from .plugin import ai_chat
 from .plugin import chat_summary
-from .plugin import self_intro
+from .plugin import self_intro, member_review
 from .reply import MessageEvent, Reply
 
 class PluginActionError(RuntimeError):
@@ -23,6 +23,7 @@ HANDLERS: dict[str, Callable[[MessageEvent], Reply | None]] = {
 
 # Stable plugin IDs are shared by rules, the catalog and group overrides.
 PLUGINS = {
+    member_review.PLUGIN_ID: {"group": "AI", "order": 0, **member_review.METADATA},
     ai_chat.PLUGIN_ID: {"group": "AI", "order": 0, **ai_chat.METADATA},
     chat_summary.PLUGIN_ID: {"group": "AI", "order": 0, **chat_summary.METADATA},
     self_intro.PLUGIN_ID: {"group": "群聊工具", "order": 0, **self_intro.METADATA},

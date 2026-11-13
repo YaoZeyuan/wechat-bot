@@ -246,7 +246,7 @@ def sender_history_ai(request_id: UUID):
     key = str(request_id)
     with closing(database()) as conn:
         retained = conn.execute(
-            "SELECT 1 FROM sender_history WHERE job_id=? AND source IN ('ai_chat', 'chat_summary')", (key,),
+            "SELECT 1 FROM sender_history WHERE job_id=? AND source IN ('ai_chat', 'chat_summary', 'member_review')", (key,),
         ).fetchone()
     if not retained:
         raise HTTPException(404, "AI 任务不存在")

@@ -11,7 +11,7 @@ from .reply import MessageEvent
 from .plugin import ai_chat
 from .plugin import chat_summary
 from .ciphertalk import SourceError
-from .plugin import self_intro
+from .plugin import self_intro, member_review
 from .plugins import PLUGINS
 
 PATH = Path(__file__).resolve().parents[1] / "local-data" / "group-plugins.json"
@@ -19,11 +19,13 @@ LOCK = Lock()
 BEIJING = timezone(timedelta(hours=8))
 RANKINGS = {"daily_activity": "活跃日榜", "total_activity": "活跃总榜", "total_lurkers": "潜水总榜"}
 ACTIVITY_STATS = "activity_stats"
-BUILTINS = (ACTIVITY_STATS, self_intro.PLUGIN_ID, ai_chat.PLUGIN_ID, chat_summary.PLUGIN_ID)
+BUILTINS = (ACTIVITY_STATS, self_intro.PLUGIN_ID, ai_chat.PLUGIN_ID, chat_summary.PLUGIN_ID, member_review.PLUGIN_ID)
 
 
 class Settings(BaseModel):
     enabled: bool
+    history_count: int = Field(default=300, gt=0)
+    max_chars: int = Field(default=300, gt=0)
     assistant_name: str | None = Field(default=None, max_length=80)
     intro_reply: str | None = Field(default=None, max_length=2500)
 
@@ -77,6 +79,8 @@ def config(group_id, plugin_id, legacy, data=None):
     inherited = defaults(plugin_id, data).model_dump(exclude={"global_enabled"})
     if value is not None and any(key in value for key in ("assistant_name", "intro_reply")):
         inherited.update(assistant_name=value.get("assistant_name"), intro_reply=value.get("intro_reply"))
+    if value is not None and plugin_id == member_review.PLUGIN_ID:
+        inherited.update({key: value[key] for key in ("history_count", "max_chars") if key in value})
     if plugin_id == ACTIVITY_STATS and any(key in stored or key in legacy for key in RANKINGS):
         inherited["enabled"] = any(stored.get(key, {}).get("enabled", legacy.get(key, False)) for key in RANKINGS)
     inherited["enabled"] = (value or {}).get("enabled", legacy.get(plugin_id, inherited["enabled"]))
@@ -86,7 +90,7 @@ def config(group_id, plugin_id, legacy, data=None):
 def save(group_id, plugin_id, settings):
     with LOCK:
         data = read_all()
-        fields = None if plugin_id == self_intro.PLUGIN_ID else {"enabled"}
+        fields = {"enabled", *(field["key"] for field in PLUGINS[plugin_id].get("fields", []))}
         current = data.setdefault(group_id, {}).setdefault(plugin_id, {})
         current.update(settings.model_dump(include=fields, exclude_unset=True))
         write_all(data)
@@ -230,6 +234,10 @@ def dispatch(source, automation, event, *, quotes=None):
     question = ai_chat.trigger(event.text, overrides=overrides) if ai_chat.PLUGIN_ID in enabled and enabled[ai_chat.PLUGIN_ID].enabled else None
     if question:
         replies.append((ai_chat.PLUGIN_ID, ""))
+    review_settings = enabled.get(member_review.PLUGIN_ID)
+    review = member_review.command(event) if quotes is None and review_settings and review_settings.enabled else None
+    if review:
+        replies.append((member_review.PLUGIN_ID, ""))
     if not replies:
         return
     contacts = source.conversation_details([event.group_id])
@@ -238,7 +246,7 @@ def dispatch(source, automation, event, *, quotes=None):
     for plugin_id, text in replies:
         job_key = next(key for key, keyword in RANKINGS.items() if keyword == event.text) if plugin_id == ACTIVITY_STATS else plugin_id
         request_id = uuid5(NAMESPACE_URL, f"wechat-bot:{event.group_id}:{event.message_id}:{job_key}")
-        if plugin_id in {ai_chat.PLUGIN_ID, chat_summary.PLUGIN_ID}:
+        if plugin_id in {ai_chat.PLUGIN_ID, chat_summary.PLUGIN_ID, member_review.PLUGIN_ID}:
             try:
                 get_job(request_id)
             except HTTPException as exc:
@@ -255,6 +263,21 @@ def dispatch(source, automation, event, *, quotes=None):
             except ai_chat.ChatError as exc:
                 text = f"AI 问答暂不可用：{exc}"
         messages = [{"type": "text", "text": text}]
+        if plugin_id == member_review.PLUGIN_ID:
+            try:
+                message = member_review.reply(source, event, str(request_id), review, review_settings)
+            except (ai_chat.ChatError, SourceError) as exc:
+                job = Job(version=1, request_id=request_id, mode="send",
+                          target={"kind": "group", "id": event.group_id, "name": name},
+                          messages=[{"type": "text", "text": "群友评价生成失败"}])
+                result, inserted = queue_job(job, strict=False, source=plugin_id)
+                if inserted:
+                    result.update(status="failed", items=["failed"], steps=[f"群友评价失败：{exc}"])
+                    save(str(request_id), result)
+                continue
+            if message is None:
+                continue
+            messages = [message]
         if plugin_id == chat_summary.PLUGIN_ID and summary:
             job = Job(version=1, request_id=request_id, mode="send",
                       target={"kind": "group", "id": event.group_id, "name": name},
