@@ -100,7 +100,17 @@ class AccessibilitySender:
 
     def prepare_chat(self, target):
         self.progress("通过手机无障碍服务检查首页并定位会话")
-        self.call("prepare", target=target)
+        try:
+            self.call("prepare", target=target)
+        except SendError as exc:
+            self.progress(f"会话定位失败：{exc}。正在返回微信聊天首页")
+            try:
+                result = self.call("restore_chat_home")
+            except SendError as recovery:
+                self.progress(f"未能恢复微信聊天首页：{recovery}")
+            else:
+                self.progress(f"已确认返回微信聊天首页，执行返回 {result['back_count']} 次")
+            raise
         self.progress("手机无障碍服务已核对会话标题")
 
     def send(self, target, text, *, current_chat=False, strict_target=False):

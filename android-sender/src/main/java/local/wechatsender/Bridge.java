@@ -89,6 +89,10 @@ public final class Bridge extends AccessibilityService {
             return new JSONObject().put("ready", !matching(named("最近聊天")).isEmpty())
                 .put("sent_confirmation", sentConfirmation() != null);
         }
+        if (action.equals("restore_chat_home")) {
+            preparedTarget = null;
+            return new JSONObject().put("back_count", returnToHome());
+        }
         String target = request.getString("target");
         if (action.equals("share")) return shareAsset(request, target, clicked);
         if (action.equals("prepare")) {
@@ -310,13 +314,20 @@ public final class Bridge extends AccessibilityService {
             && bounds.bottom < button.top;
     }
 
-    private void locate(String target) throws Exception {
-        for (int attempt = 0; attempt < 5 && !home(); attempt++) {
+    private int returnToHome() throws Exception {
+        int attempts = 0;
+        while (attempts < 5 && !home()) {
             require(!nodes().isEmpty(), "无障碍未读到前台微信控件");
             require(performGlobalAction(GLOBAL_ACTION_BACK), "无法返回聊天首页");
+            attempts++;
             pause();
         }
         require(home(), "无法确认聊天首页");
+        return attempts;
+    }
+
+    private void locate(String target) throws Exception {
+        returnToHome();
         List<AccessibilityNodeInfo> direct = conversationRows(target);
         require(direct.size() <= 1, "首页有多个同名会话");
         if (direct.size() == 1) {
@@ -346,7 +357,7 @@ public final class Bridge extends AccessibilityService {
         List<AccessibilityNodeInfo> results = conversationRows(target);
         require(results.size() == 1, "目标会话匹配数为 " + results.size());
         click(results.get(0));
-        pause();
+        for (int attempt = 0; attempt < 4 && !inChat(target); attempt++) pause();
     }
 
     private boolean home() {
