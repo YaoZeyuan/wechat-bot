@@ -11,11 +11,19 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class MessageAuthor(ContractModel):
+    user_id: NonEmpty
+    group_nickname: str | None = None
+    username: str | None = None
+    remark: str | None = None
+
+
 class MessageEvent(ContractModel):
     version: Literal[1] = 1
     group_id: NonEmpty
     message_id: NonEmpty
     sender_id: NonEmpty
+    author: MessageAuthor | None = None
     timestamp_ms: int = Field(gt=0)
     text: str
 

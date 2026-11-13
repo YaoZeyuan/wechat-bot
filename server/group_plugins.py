@@ -232,8 +232,7 @@ def dispatch(source, automation, event, *, quotes=None):
         replies.append((ai_chat.PLUGIN_ID, ""))
     if not replies:
         return
-    identities = [event.group_id, event.sender_id] if question else [event.group_id]
-    contacts = source.conversation_details(identities)
+    contacts = source.conversation_details([event.group_id])
     details = contacts.get(event.group_id, {})
     name = details.get("remark") or details.get("original_name") or event.group_id
     for plugin_id, text in replies:
@@ -249,8 +248,8 @@ def dispatch(source, automation, event, *, quotes=None):
                 continue
         if plugin_id == ai_chat.PLUGIN_ID and question:
             try:
-                author = contacts.get(event.sender_id, {})
-                name_hint = author.get("remark") or author.get("original_name") or ""
+                author = event.author
+                name_hint = (author.remark or author.username or author.group_nickname or "") if author else ""
                 prompt = ai_chat.format_question(question[1], name_hint, quotes or [])
                 text = ai_chat.answer(question[0], prompt, request_id=str(request_id), overrides=overrides)
             except ai_chat.ChatError as exc:

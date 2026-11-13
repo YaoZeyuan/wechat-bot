@@ -4,7 +4,7 @@ import structlog
 
 from .automation import Automation
 from .ciphertalk import SourceError
-from .reply import MessageEvent
+from .reply import MessageAuthor, MessageEvent
 from .group_plugins import dispatch as dispatch_builtin
 
 log = structlog.get_logger("wechat_bot.polling")
@@ -27,12 +27,15 @@ def incoming_text(group_id: str, row: dict, identity: str) -> MessageEvent | Non
         return None
     if row.get("kind", str(row.get("type"))) not in {"text", "1", "quote"}:
         return None
-    sender = (row.get("sender") or {}).get("username") or row.get("senderUsername")
+    sender_info = row.get("sender") or {}
+    sender = sender_info.get("username") or row.get("senderUsername")
     timestamp = row.get("timestampMs") or int(row.get("createTime") or 0) * 1000
     if not sender or not timestamp:
         raise SourceError("文本消息缺少发送者或时间戳")
     return MessageEvent(
         group_id=group_id, message_id=identity, sender_id=sender,
+        author=MessageAuthor(user_id=sender, group_nickname=sender_info.get("group_nickname"),
+                             username=sender_info.get("original_name"), remark=sender_info.get("remark")),
         timestamp_ms=timestamp, text=row.get("text", row.get("content", "")),
     )
 
@@ -72,9 +75,23 @@ def poll_group(source, automation: Automation, group_id: str, source_id: str = "
         raise SourceError("未找到上次读取位置，已保留游标以避免漏读或重复触发")
     if not newer:
         return 0
-    for identity, row in reversed(newer.items()):
-        event = incoming_text(group_id, row, f"{source_id}:{identity}" if source_id else identity)
+    events = [(incoming_text(group_id, row, f"{source_id}:{identity}" if source_id else identity), row)
+              for identity, row in reversed(newer.items())]
+    sender_ids = list(dict.fromkeys(event.sender_id for event, _ in events if event is not None))
+    contacts = {}
+    if sender_ids and hasattr(source, "conversation_details"):
+        for start in range(0, len(sender_ids), 100):
+            contacts.update(source.conversation_details(sender_ids[start:start + 100]))
+    nicknames = source.group_nicknames(group_id) if sender_ids and hasattr(source, "group_nicknames") else {}
+    for event, row in events:
         if event is not None:
+            contact = contacts.get(event.sender_id, {})
+            author = event.author.model_copy(update={
+                "group_nickname": nicknames.get(event.sender_id) or event.author.group_nickname,
+                "username": contact.get("original_name") or event.author.username,
+                "remark": contact.get("remark") or event.author.remark,
+            })
+            event = event.model_copy(update={"author": author})
             if row.get("kind") == "quote":
                 dispatch_builtin(source, automation, event, quotes=row.get("quotes") or [])
             else:
