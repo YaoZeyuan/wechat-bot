@@ -155,6 +155,9 @@ def dispatch(source, automation, event, *, quotes=None):
             summary = chat_summary.command(event.text, event.timestamp_ms)
         except ValueError:
             replies.append((chat_summary.PLUGIN_ID, "日期无效，请使用 YYYYMMDD 格式，例如 梳理20261111。"))
+        if summary and isinstance(summary[0], int) and summary[0] < 50:
+            replies.append((chat_summary.PLUGIN_ID, "最小梳理50条，请检查后重试"))
+            summary = None
         if summary:
             replies.append((chat_summary.PLUGIN_ID, ""))
     if quotes is None:
@@ -213,7 +216,8 @@ def dispatch(source, automation, event, *, quotes=None):
                 result["steps"].append(message)
                 save(str(request_id), result)
 
-            progress(f"开始梳理 {summary[0]} 的聊天记录")
+            scope = f"最近 {summary[0]} 条" if isinstance(summary[0], int) else f"{summary[0]} 的"
+            progress(f"开始梳理{scope}聊天记录")
             try:
                 chat_summary.make_report(source, event, request_id, *summary, progress=progress)
             except (OSError, RuntimeError, ValueError, SourceError, chat_summary.subprocess.SubprocessError) as exc:

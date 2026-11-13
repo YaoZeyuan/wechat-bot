@@ -6,6 +6,7 @@ import secrets
 import shutil
 import subprocess
 from datetime import datetime, timedelta
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import time
@@ -15,7 +16,7 @@ import structlog
 from markdown_it import MarkdownIt
 
 from ... import global_ai
-from ...chat_transcript import BEIJING, read_transcript
+from ...chat_transcript import BEIJING, format_transcript, read_transcript
 
 PLUGIN_ID = "chat_summary"
 METADATA = {"name": "聊天梳理", "description": "按北京时间梳理指定日期的群聊，发送 PDF",
@@ -27,6 +28,9 @@ log = structlog.get_logger("wechat_bot.chat_summary")
 
 
 def command(text, timestamp_ms):
+    count = re.fullmatch(r"梳理\s*([0-9]{1,3})", text.strip())
+    if count:
+        return int(count[1]), False
     matched = re.fullmatch(r"(重新梳理|梳理)(?:\s*([0-9]{8}))?", text.strip())
     if not matched or (matched[1] == "重新梳理" and not matched[2]):
         return None
@@ -130,7 +134,33 @@ def report_filename(source, group_id, day):
 def make_report(source, event, request_id, day, refresh, *, progress=lambda message: None):
     from ...sender_jobs import stage_local_pdf
 
-    target = report_pdf(source, event.group_id, request_id, day, refresh, progress=progress)
-    stage_local_pdf(request_id, target, report_filename(source, event.group_id, day))
+    if isinstance(day, int):
+        progress(f"读取指令之前最近 {day} 条聊天记录")
+        rows = []
+        found = False
+        with closing(source.iter_messages(event.group_id)) as messages:
+            for row in messages:
+                if found:
+                    rows.append(row)
+                    if len(rows) == day:
+                        break
+                elif event.message_id == row["messageId"] or event.message_id.endswith(":" + row["messageId"]):
+                    found = True
+        if not found or not rows:
+            raise RuntimeError("未找到指令之前的聊天记录")
+        rows.reverse()
+        source.populate_sender_names(rows, include_remarks=False, group_id=event.group_id)
+        transcript = format_transcript(source, event.group_id, rows, "指令前的聊天记录（北京时间）")
+        progress("正在请求模型梳理")
+        markdown = global_ai.summarize(transcript, str(request_id))
+        progress("模型已返回，正在生成 PDF")
+        CACHE.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(dir=CACHE) as temp:
+            target = Path(temp) / "summary.pdf"
+            render_pdf(markdown, target)
+            stage_local_pdf(request_id, target, f"群聊梳理-最近{len(rows)}条.pdf")
+    else:
+        target = report_pdf(source, event.group_id, request_id, day, refresh, progress=progress)
+        stage_local_pdf(request_id, target, report_filename(source, event.group_id, day))
     progress("PDF 已就绪，等待手机发送")
     return {"type": "file", "asset_id": request_id}

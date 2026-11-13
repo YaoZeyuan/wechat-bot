@@ -12,9 +12,13 @@ def read_transcript(source, session_id: str, start: date, end: date) -> str:
     start_seconds = int(datetime.combine(start, time.min, BEIJING).timestamp())
     end_seconds = int(datetime.combine(end, time.min, BEIJING).timestamp()) + 86400
     rows = source.messages_in_range(session_id, start_seconds=start_seconds, end_seconds=end_seconds)
+    return format_transcript(source, session_id, rows, f"北京时间 {start.isoformat()} 至 {end.isoformat()}")
+
+
+def format_transcript(source, session_id, rows, scope):
     details = source.conversation_details([session_id]).get(session_id, {})
     title = details.get("original_name") or "聊天记录"
-    lines = [f"# {title}", "", f"北京时间 {start.isoformat()} 至 {end.isoformat()} · {len(rows)} 条", ""]
+    lines = [f"# {title}", "", f"{scope} · {len(rows)} 条", ""]
     for row in rows:
         stamp = datetime.fromtimestamp(row["timestampMs"] / 1000, BEIJING)
         sender = row["sender"]
