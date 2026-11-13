@@ -70,6 +70,7 @@ const tabs = [
 .brand { display: block; color: white; font-size: 19px; font-weight: 750; padding: 0 12px; margin-bottom: 26px; }
 nav { display: grid; gap: 5px; }
 nav a { display: block; padding: 9px 12px; border-radius: 7px; color: #c2ccdb; }
+.brand:hover, nav a:hover, nav a:focus-visible { text-decoration: none; }
 nav a:hover { background: #22334b; color: white; }
 nav a.router-link-exact-active { background: #304669; color: white; font-weight: 600; }
 .admin-main,.admin-content { min-width: 0; }

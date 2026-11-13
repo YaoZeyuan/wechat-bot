@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Card as ACard, Input as AInput, Switch as ASwitch, Textarea as ATextarea } from '@arco-design/web-vue'
+import { Card as ACard, Input as AInput, Textarea as ATextarea } from '@arco-design/web-vue'
 import { api, type GroupPlugin } from './api'
 
 const props = defineProps<{ plugin: GroupPlugin; groupId: string }>()
@@ -9,8 +9,7 @@ const draft = ref({ ...props.plugin })
 const busy = ref(false)
 const feedback = ref('')
 const error = ref('')
-const dirty = computed(() => draft.value.enabled !== props.plugin.enabled ||
-  (props.plugin.fields ?? []).some(field => (draft.value[field.key] ?? '') !== (props.plugin[field.key] ?? '')))
+const dirty = computed(() => (props.plugin.fields ?? []).some(field => (draft.value[field.key] ?? '') !== (props.plugin[field.key] ?? '')))
 
 function reset() {
   draft.value = { ...props.plugin }
@@ -41,10 +40,6 @@ async function save() {
 <template>
   <a-card :bordered="false" class="plugin-settings">
     <form @submit.prevent="save">
-      <div class="settings-row">
-        <div><strong>在此群启用</strong><small>{{ draft.enabled ? '启用' : '停用' }}</small></div>
-        <a-switch v-model="draft.enabled" aria-label="在此群启用" :disabled="busy" />
-      </div>
       <div v-for="field in plugin.fields" :key="field.key" class="settings-row field">
         <label :for="`plugin-${field.key}`">{{ field.label }}<small v-if="field.description">{{ field.description }}</small></label>
         <a-textarea v-if="field.type === 'textarea'" :id="`plugin-${field.key}`" :model-value="draft[field.key] ?? ''"

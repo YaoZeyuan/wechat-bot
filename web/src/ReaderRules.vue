@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Switch as ASwitch, Card as ACard } from '@arco-design/web-vue'
 import PluginSettings from './PluginSettings.vue'
 import AiChatSettings from './AiChatSettings.vue'
 import SummaryPreview from './SummaryPreview.vue'
@@ -18,6 +19,35 @@ const interval = ref<number | ''>()
 const monitored = ref<MonitoredGroup[]>([])
 const currentGroup = computed(() => monitored.value.find(group => group.group_id === groupId.value))
 const enabledCount = computed(() => monitored.value.filter(group => group.enabled).length)
+const switching = ref(false)
+const sections = computed(() => {
+  const groups = new Map<string, GroupPlugin[]>()
+  const sorted = [...plugins.value].sort((a, b) =>
+    (b.order ?? 0) - (a.order ?? 0) || a.name.localeCompare(b.name, 'zh-CN'))
+  for (const plugin of sorted) {
+    const name = plugin.group || '其他'
+    if (!groups.has(name)) groups.set(name, [])
+    groups.get(name)!.push(plugin)
+  }
+  return groups
+})
+const detailPlugin = computed(() => plugins.value.find(plugin => plugin.id === activePlugin.value))
+function updatePlugin(updated: GroupPlugin) {
+  plugins.value = plugins.value.map(item => item.id === updated.id ? updated : item)
+}
+async function togglePlugin(plugin: GroupPlugin, enabled: boolean) {
+  const id = groupId.value
+  switching.value = true
+  pluginError.value = ''
+  try {
+    const updated = await api.saveGroupPlugin(id, plugin.id, enabled, plugin.assistant_name, plugin.intro_reply)
+    if (groupId.value === id) updatePlugin(updated)
+  } catch (cause) {
+    if (groupId.value === id) pluginError.value = (cause as Error).message
+  } finally {
+    switching.value = false
+  }
+}
 const activePlugin = ref('')
 const plugins = ref<GroupPlugin[]>([])
 const pluginError = ref('')
@@ -181,19 +211,30 @@ onUnmounted(() => window.clearInterval(refreshTimer))
           </div>
           <h3>此群的插件</h3>
           <a-alert v-if="pluginError" type="error">{{ pluginError }}</a-alert>
-          <ul v-if="plugins.length" class="compact-list">
-            <li v-for="plugin in plugins" :key="plugin.id">
-              <div class="identity"><strong>{{ plugin.name }}</strong><small>{{ plugin.description }}</small></div>
-              <a-tag :color="plugin.enabled ? 'green' : 'gray'">{{ plugin.enabled ? '启用' : '停用' }}</a-tag>
-              <a-button size="small" @click="activePlugin = activePlugin === plugin.id ? '' : plugin.id">配置</a-button>
-              <div v-if="activePlugin === plugin.id" style="flex-basis: 100%">
-                <PluginSettings :key="`${groupId}:${plugin.id}`" :plugin="plugin" :group-id="groupId"
-                  @saved="updated => plugins = plugins.map(item => item.id === updated.id ? updated : item)" />
-                <AiChatSettings v-if="plugin.id === 'ai_chat'" :key="groupId" :group-id="groupId" />
-                <SummaryPreview v-if="plugin.id === 'chat_summary'" :group-id="groupId" />
-              </div>
-            </li>
-          </ul>
+          <section v-for="[name, items] in sections" :key="name" class="plugin-section">
+            <h4>{{ name }}</h4>
+            <div class="plugin-cards">
+              <a-card v-for="plugin in items" :key="plugin.id" class="plugin-card">
+                <div class="card-head">
+                  <strong>{{ plugin.name }}</strong>
+                  <a-switch :model-value="plugin.enabled" :disabled="switching"
+                    :aria-label="plugin.name" @change="value => togglePlugin(plugin, value === true)" />
+                </div>
+                <p>{{ plugin.description }}</p>
+                <a-button size="small" @click="activePlugin = plugin.id">查看详情</a-button>
+              </a-card>
+            </div>
+          </section>
+          <a-modal :visible="!!detailPlugin" :title="detailPlugin?.name" :footer="false"
+            :width="'min(680px, 94vw)'" @cancel="activePlugin = ''">
+            <template v-if="detailPlugin">
+              <p>{{ detailPlugin.description }}</p>
+              <PluginSettings v-if="detailPlugin.fields?.length" :key="groupId + ':' + detailPlugin.id"
+                :plugin="detailPlugin" :group-id="groupId" @saved="updatePlugin" />
+              <AiChatSettings v-if="detailPlugin.id === 'ai_chat'" :key="groupId" :group-id="groupId" />
+              <SummaryPreview v-if="detailPlugin.id === 'chat_summary'" :group-id="groupId" />
+            </template>
+          </a-modal>
         </template>
         <p v-else class="muted">{{ busy ? '正在加载群配置…' : groupId ? '没有找到该群配置。请先在聊天记录中为该群启用机器人。' : '请从监听群列表选择一个群。' }}</p>
       </section>
@@ -202,6 +243,11 @@ onUnmounted(() => window.clearInterval(refreshTimer))
 </template>
 
 <style scoped>
+.plugin-section h4 { margin: 18px 0 8px; }
+.plugin-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 255px), 1fr)); gap: 12px; }
+.plugin-card { border-radius: 10px; }
+.plugin-card p { color: var(--color-text-2); min-height: 2.8em; }
+
 .rules-page { display: grid; gap: 16px; }
 .rules-page .card { margin: 0; min-width: 0; }
 .page-heading p, .muted, small { color: var(--color-text-3); }

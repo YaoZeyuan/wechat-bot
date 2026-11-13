@@ -119,6 +119,8 @@ export interface ConversationDetails {
 }
 
 export interface GroupPlugin {
+  group?: string
+  order?: number
   id: string
   name: string
   description: string
