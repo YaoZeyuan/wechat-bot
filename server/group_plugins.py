@@ -45,10 +45,22 @@ def save(group_id, plugin_id, settings):
         data = read_all()
         fields = None if plugin_id == self_intro.PLUGIN_ID else {"enabled"}
         data.setdefault(group_id, {})[plugin_id] = settings.model_dump(include=fields, exclude_none=True)
-        PATH.parent.mkdir(parents=True, exist_ok=True)
-        pending = PATH.with_suffix(".tmp")
-        pending.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        pending.replace(PATH)
+        write_all(data)
+
+
+def write_all(data):
+    PATH.parent.mkdir(parents=True, exist_ok=True)
+    pending = PATH.with_suffix(".tmp")
+    pending.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    pending.replace(PATH)
+
+
+def delete_group_settings(group_id):
+    with LOCK:
+        data = read_all()
+        if group_id in data:
+            del data[group_id]
+            write_all(data)
 
 
 def bot_replies(group_id, start, end):

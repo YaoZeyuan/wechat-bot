@@ -7,6 +7,11 @@ METADATA = {
     "default_enabled": False,
     "version": "1.0.0",
     "capability": "手机发送",
+    "fields": [
+        {"key": "assistant_name", "label": "助手名字", "type": "input", "max_length": 80,
+         "placeholder": "张八旦", "description": "填写名字即可。群内单独发送 @名字 时触发。"},
+        {"key": "intro_reply", "label": "介绍文案", "type": "textarea", "max_length": 2500},
+    ],
 }
 
 

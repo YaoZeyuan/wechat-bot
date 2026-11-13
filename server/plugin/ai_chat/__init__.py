@@ -1,6 +1,7 @@
 """Single-turn chat with an OpenAI-compatible model provider."""
 import json
 import re
+from threading import Lock
 from pathlib import Path
 from time import perf_counter
 from typing import Literal
@@ -18,6 +19,7 @@ METADATA = {
     "default_enabled": False, "version": "1.0.0", "capability": "模型 API、手机发送",
 }
 CONFIG = Path(__file__).resolve().parents[3] / "plugins" / "ai_chat" / "config.json"
+CONFIG_LOCK = Lock()
 log = structlog.get_logger("wechat_bot.ai_chat")
 PREFIX_SEPARATORS = re.compile(r"^[\s,，、.。｡!！?？:：;；…‥—–－-]+")
 
@@ -55,6 +57,56 @@ class Settings(BaseModel):
     reply_prefix: str = Field(default="", max_length=200)
     providers: dict[str, Provider]
     routes: dict[str, ModelRoute]
+
+
+class RouteUpdate(BaseModel):
+    base_url: HttpUrl
+    model: Model
+    prefixes: list[str]
+    strip_prefixes: list[str]
+    timeout_seconds: float = Field(gt=0, le=600)
+
+
+def editable_settings() -> Settings:
+    path = CONFIG if CONFIG.exists() else CONFIG.with_name("config.example.json")
+    return Settings.model_validate_json(path.read_text(encoding="utf-8-sig"))
+
+
+def route_settings() -> list[dict]:
+    settings = editable_settings()
+    return [
+        {"id": route_id, "provider": route.provider, "model_alias": route.model,
+         "base_url": str(provider.base_url), "timeout_seconds": provider.timeout_seconds,
+         "prefixes": [route_id] if route.prefixes is None else route.prefixes, "strip_prefixes": route.strip_prefixes,
+         "has_api_key": bool(provider.api_key.get_secret_value()),
+         "model": Model(id=model).model_dump() if isinstance(model, str) else model.model_dump()}
+        for route_id, route in settings.routes.items()
+        for provider in [settings.providers[route.provider]]
+        for model in [provider.models[route.model]]
+    ]
+
+
+def update_route(route_id: str, patch: RouteUpdate):
+    if patch.base_url.scheme != "https" or patch.base_url.username or patch.base_url.password or patch.base_url.query or patch.base_url.fragment:
+        raise ValueError("请输入 HTTPS API Base，且地址中不能包含凭据、查询参数或片段")
+    with CONFIG_LOCK:
+        settings = editable_settings()
+        route = settings.routes[route_id]
+        provider = settings.providers[route.provider]
+        route.prefixes = patch.prefixes
+        route.strip_prefixes = patch.strip_prefixes
+        provider.base_url = patch.base_url
+        provider.timeout_seconds = patch.timeout_seconds
+        provider.models[route.model] = patch.model
+        data = settings.model_dump(mode="json")
+        for key, entry in settings.providers.items():
+            data["providers"][key]["api_key"] = entry.api_key.get_secret_value()
+        pending = CONFIG.with_suffix(".json.tmp")
+        try:
+            pending.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            pending.replace(CONFIG)
+        finally:
+            pending.unlink(missing_ok=True)
 
 
 def trigger(text: str) -> tuple[str, str] | None:

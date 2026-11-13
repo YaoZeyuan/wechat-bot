@@ -60,26 +60,6 @@ watch(() => currentGroup.value?.group_id, async (id, _, onCleanup) => {
   }
 }, { immediate: true })
 
-function savePlugin(plugin: GroupPlugin, enabled: boolean) {
-  const id = currentGroup.value?.group_id
-  if (!id) return
-  return run(async () => {
-    const updated = await api.saveGroupPlugin(id, plugin.id, enabled, plugin.assistant_name, plugin.intro_reply)
-    if (currentGroup.value?.group_id === id) {
-      plugins.value = plugins.value.map(item => item.id === updated.id ? updated : item)
-      if (updated.id === 'open_baidu' && updated.enabled) {
-        rules.value = (await api.readerRules()).items
-        const trigger = rules.value.find(rule => rule.group_id === id && rule.keyword === '测试')
-        if (trigger?.handler !== 'open_baidu') {
-          notice.value = '「测试」已被其他规则使用。可编辑该规则，把动作切换到「打开百度」。'
-        } else {
-          notice.value = '已启用「打开百度」。群收到「测试」时会在电脑打开网页。'
-        }
-      }
-    }
-  })
-}
-
 async function load() {
   const [config, runs, status, groupSettings] = await Promise.all([
     api.readerRules(), api.readerDeliveries(), api.readerStatus(), api.monitoredGroups(),
@@ -205,7 +185,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
 <template>
   <main class="page rules-page">
     <header class="page-heading">
-      <RouterLink v-if="isGroupPage" to="/rules">返回监听群列表</RouterLink>
+      <RouterLink v-if="isGroupPage" to="/group">返回监听群列表</RouterLink>
       <h1>{{ isGroupPage ? '群机器人配置' : '全局配置' }}</h1>
       <p v-if="!isGroupPage">配置全局监听和默认 AI 模型，或从监听群列表进入群机器人配置。</p>
     </header>
@@ -276,13 +256,8 @@ onUnmounted(() => window.clearInterval(refreshTimer))
           <ul v-if="plugins.length" class="compact-list">
             <li v-for="plugin in plugins" :key="plugin.id">
               <div class="identity"><strong>{{ plugin.name }}</strong><small>{{ plugin.description }}</small></div>
-              <div v-if="plugin.id === 'self_intro'" class="identity">
-                <label>助手名字 <input v-model.trim="plugin.assistant_name" maxlength="80" placeholder="张八旦" :disabled="busy" /></label>
-                <label>介绍文案 <textarea v-model="plugin.intro_reply" maxlength="2500" rows="3" :disabled="busy" /></label>
-                <a-button size="small" :disabled="busy" @click="savePlugin(plugin, plugin.enabled)">保存参数</a-button>
-              </div>
               <a-tag :color="plugin.enabled ? 'green' : 'gray'">{{ plugin.enabled ? '启用' : '停用' }}</a-tag>
-              <a-button size="small" :disabled="busy" @click="savePlugin(plugin, !plugin.enabled)">{{ plugin.enabled ? '停用' : '启用' }}</a-button>
+              <RouterLink :to="{ path: '/plugins', query: { plugin: plugin.id, group: currentGroup.group_id } }">配置</RouterLink>
             </li>
           </ul>
           <h3>触发规则</h3>

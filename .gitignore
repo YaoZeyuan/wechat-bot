@@ -26,3 +26,4 @@ Thumbs.db
 /android-sender/build/
 /android-sender/local.properties
 /plugins/**/config.json
+/plugins/**/config.json.tmp

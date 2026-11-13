@@ -36,6 +36,18 @@ export interface GlobalAiSettings {
   has_api_key: boolean
 }
 
+export interface AiChatRoute {
+  id: string
+  provider: string
+  model_alias: string
+  has_api_key: boolean
+  base_url: string
+  timeout_seconds: number
+  prefixes: string[]
+  strip_prefixes: string[]
+  model: { id: string; thinking: 'enabled' | 'disabled' | null; web_search: boolean }
+}
+
 export interface Conversation {
   id: string
   name: string
@@ -103,6 +115,8 @@ export interface GroupPlugin {
   capability: string
   assistant_name?: string | null
   intro_reply?: string | null
+  fields?: { key: 'assistant_name' | 'intro_reply'; label: string; type: 'input' | 'textarea';
+    max_length: number; placeholder?: string; description?: string }[]
 }
 
 interface Delivery {
@@ -159,6 +173,15 @@ export interface SenderHistoryItem {
 }
 
 export const api = {
+  aiChatRoutes: () => request<AiChatRoute[]>('/reader/plugins/ai_chat/routes'),
+  saveAiChatRoute: (route: AiChatRoute) => request<AiChatRoute[]>(
+    `/reader/plugins/ai_chat/routes/${encodeURIComponent(route.id)}`, {
+      method: 'PUT', body: JSON.stringify({
+        base_url: route.base_url, timeout_seconds: route.timeout_seconds, model: route.model,
+        prefixes: route.prefixes, strip_prefixes: route.strip_prefixes,
+      }),
+    },
+  ),
   globalAi: () => request<GlobalAiSettings>('/reader/global-ai'),
   saveGlobalAi: (settings: Omit<GlobalAiSettings, 'has_api_key'> & { api_key: string }) =>
     request<GlobalAiSettings>('/reader/global-ai', { method: 'PUT', body: JSON.stringify(settings) }),
@@ -207,6 +230,8 @@ export const api = {
       method: 'PUT', body: JSON.stringify({ enabled, assistant_name, intro_reply }),
     }),
   monitoredGroups: () => request<MonitoredGroup[]>('/reader/monitored-groups'),
+  deleteMonitoredGroup: (id: string) =>
+    request<{ ok: boolean }>(`/reader/monitored-groups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   saveMonitoredGroup: (group: MonitoredGroup) =>
     request<MonitoredGroup>('/reader/monitored-groups', { method: 'PUT', body: JSON.stringify(group) }),
   monitorGroups: (q: string) =>

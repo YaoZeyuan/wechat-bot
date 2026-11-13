@@ -14,6 +14,7 @@ from fastapi.responses import PlainTextResponse
 
 from .chat_transcript import read_transcript
 from . import global_ai
+from .plugin import ai_chat
 from pathlib import Path
 from typing import Literal
 from threading import Lock
@@ -32,6 +33,27 @@ from .polling import incoming_text, message_id, poll_group
 from .reply import SendTask
 
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
+
+
+@router.get("/plugins/ai_chat/routes")
+def get_ai_chat_routes():
+    try:
+        return ai_chat.route_settings()
+    except (OSError, ValueError, KeyError):
+        raise HTTPException(422, "AI 问答配置无效，请检查本机配置文件") from None
+
+
+@router.put("/plugins/ai_chat/routes/{route_id}")
+def set_ai_chat_route(route_id: str, patch: ai_chat.RouteUpdate):
+    try:
+        ai_chat.update_route(route_id, patch)
+    except KeyError:
+        raise HTTPException(404, "未找到 AI 问答路由") from None
+    except ValueError:
+        raise HTTPException(422, "AI 问答配置无效，请检查模型参数和 API Base") from None
+    except OSError:
+        raise HTTPException(502, "无法保存 AI 问答配置") from None
+    return get_ai_chat_routes()
 
 
 @router.get("/global-ai")
@@ -375,6 +397,14 @@ def update_monitored_group(group: GroupMonitoring) -> GroupMonitoring:
         raise HTTPException(409, str(exc)) from None
     log.info("desktop_group_monitoring_changed", group_id=group.group_id, enabled=group.enabled)
     return group
+
+
+@router.delete("/monitored-groups/{group_id}")
+def delete_monitored_group(group_id: str):
+    if not automation.delete_monitored_group(group_id):
+        raise HTTPException(404, "未找到监听群")
+    log.info("desktop_group_deleted", msg="已删除监听群及配置", group_id=group_id)
+    return {"ok": True}
 
 
 class GroupPluginSettings(builtin_plugins.Settings):

@@ -130,6 +130,20 @@ class Automation:
                 "DO UPDATE SET name=excluded.name, enabled=excluded.enabled", (group_id, name, enabled),
             )
 
+    def delete_monitored_group(self, group_id: str) -> bool:
+        from .group_plugins import delete_group_settings
+
+        with self.database() as db:
+            deleted = db.execute("DELETE FROM monitored_groups WHERE group_id=?", (group_id,)).rowcount
+            if not deleted:
+                return False
+            db.execute("DELETE FROM rules WHERE group_id=?", (group_id,))
+            db.execute("DELETE FROM group_plugins WHERE group_id=?", (group_id,))
+            db.execute("DELETE FROM reader_cursors WHERE group_id=? OR substr(group_id, -length(?) - 1)=?",
+                       (group_id, group_id, ":" + group_id))
+            delete_group_settings(group_id)
+        return True
+
     def group_plugins(self, group_id: str) -> dict[str, bool]:
         with self.database() as db:
             return {row["plugin_id"]: bool(row["enabled"]) for row in db.execute(
