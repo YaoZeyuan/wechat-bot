@@ -355,7 +355,11 @@ public final class Bridge extends AccessibilityService {
         setText(unique(n -> n.isEditable(), "搜索输入框"), target);
         pause();
         List<AccessibilityNodeInfo> results = group ? groupSearchRows(target) : conversationRows(target);
-        if (group) require(results.size() == 1, "搜索页「群聊」分区内匹配数为 " + results.size());
+        for (int attempt = 0; group && results.isEmpty() && attempt < 4; attempt++) {
+            pause();
+            results = groupSearchRows(target);
+        }
+        if (group) require(results.size() == 1, "搜索页本地群聊匹配数为 " + results.size());
         require(results.size() == 1, "目标会话匹配数为 " + results.size());
         click(results.get(0));
         for (int attempt = 0; attempt < 4 && !inChat(target); attempt++) pause();
@@ -363,7 +367,11 @@ public final class Bridge extends AccessibilityService {
 
     private List<AccessibilityNodeInfo> groupSearchRows(String target) throws Exception {
         Rect heading = new Rect();
-        unique(named("群聊"), "搜索页群聊分区").getBoundsInScreen(heading);
+        List<AccessibilityNodeInfo> headings = matching(named("群聊"));
+        boolean frequent = headings.isEmpty();
+        if (frequent) headings = matching(named("最常使用"));
+        if (headings.size() != 1) return new ArrayList<>();
+        headings.get(0).getBoundsInScreen(heading);
         int bottom = getResources().getDisplayMetrics().heightPixels;
         for (AccessibilityNodeInfo node : matching(n -> named("搜索网络结果").test(n)
                 || named("聊天记录").test(n) || named("联系人").test(n)
@@ -374,15 +382,23 @@ public final class Bridge extends AccessibilityService {
         }
         final int sectionBottom = bottom;
         java.util.regex.Pattern title = java.util.regex.Pattern.compile(
-            java.util.regex.Pattern.quote(target) + "(?:\\s*[（(]\\d+[）)])?");
+            java.util.regex.Pattern.quote(target) + "(?:\\s*[（(]\\d+[）)])?[\\s\\p{Cf}\\uFFFC]*");
         Set<AccessibilityNodeInfo> rows = new LinkedHashSet<>();
         for (AccessibilityNodeInfo node : matching(n -> !n.isEditable()
                 && (title.matcher(value(n.getText())).matches()
                     || title.matcher(value(n.getContentDescription())).matches()))) {
             AccessibilityNodeInfo row = clickable(node);
             if (row == null || row.isEditable() || isWebSearch(row)) continue;
+            if (frequent) {
+                List<AccessibilityNodeInfo> card = new ArrayList<>();
+                collect(row, card);
+                boolean groupCard = card.stream().anyMatch(n ->
+                    value(n.getText()).toString().matches("群聊名[:：].*")
+                    || value(n.getContentDescription()).toString().matches("群聊名[:：].*"));
+                if (!groupCard) continue;
+            }
             Rect bounds = new Rect();
-            row.getBoundsInScreen(bounds);
+            node.getBoundsInScreen(bounds);
             if (bounds.top >= heading.bottom && bounds.bottom <= sectionBottom) rows.add(row);
         }
         return new ArrayList<>(rows);
@@ -414,7 +430,7 @@ public final class Bridge extends AccessibilityService {
     private List<AccessibilityNodeInfo> titles(String name) {
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
         java.util.regex.Pattern groupTitle = java.util.regex.Pattern.compile(
-            java.util.regex.Pattern.quote(name) + "\\s*[（(]\\d+[）)]");
+            java.util.regex.Pattern.quote(name) + "(?:\\s*[（(]\\d+[）)])?[\\s\\p{Cf}\\uFFFC]*");
         return matching(n -> {
             Rect bounds = new Rect();
             n.getBoundsInScreen(bounds);
