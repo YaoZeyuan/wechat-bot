@@ -72,14 +72,15 @@ def editable_settings() -> Settings:
     return Settings.model_validate_json(path.read_text(encoding="utf-8-sig"))
 
 
-def route_settings() -> list[dict]:
+def route_settings(overrides=None) -> list[dict]:
     settings = editable_settings()
     return [
         {"id": route_id, "provider": route.provider, "model_alias": route.model,
          "base_url": str(provider.base_url), "timeout_seconds": provider.timeout_seconds,
          "prefixes": [route_id] if route.prefixes is None else route.prefixes, "strip_prefixes": route.strip_prefixes,
          "has_api_key": bool(provider.api_key.get_secret_value()),
-         "model": Model(id=model).model_dump() if isinstance(model, str) else model.model_dump()}
+         "model": Model(id=model).model_dump() if isinstance(model, str) else model.model_dump(),
+         **(overrides or {}).get(route_id, {})}
         for route_id, route in settings.routes.items()
         for provider in [settings.providers[route.provider]]
         for model in [provider.models[route.model]]
@@ -109,13 +110,16 @@ def update_route(route_id: str, patch: RouteUpdate):
             pending.unlink(missing_ok=True)
 
 
-def trigger(text: str) -> tuple[str, str] | None:
+def trigger(text: str, *, overrides=None) -> tuple[str, str] | None:
     try:
         settings = Settings.model_validate_json(CONFIG.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return None
     candidates = []
     for route_id, route in settings.routes.items():
+        if overrides and route_id in overrides:
+            patch = RouteUpdate.model_validate(overrides[route_id])
+            route = route.model_copy(update={"prefixes": patch.prefixes, "strip_prefixes": patch.strip_prefixes})
         strip_prefixes = {alias.strip().casefold() for alias in route.strip_prefixes}
         prefixes = [route_id] if route.prefixes is None else route.prefixes
         for alias in [*prefixes, *route.strip_prefixes]:
@@ -156,7 +160,7 @@ def with_quotes(prompt: str, quotes: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def answer(prefix: str, prompt: str, *, request_id: str | None = None) -> str:
+def answer(prefix: str, prompt: str, *, request_id: str | None = None, overrides=None) -> str:
     try:
         settings = Settings.model_validate_json(CONFIG.read_text(encoding="utf-8-sig"))
         route = settings.routes[prefix]
@@ -164,6 +168,10 @@ def answer(prefix: str, prompt: str, *, request_id: str | None = None) -> str:
         model = provider.models[route.model]
         if isinstance(model, str):
             model = Model(id=model)
+        if overrides and prefix in overrides:
+            patch = RouteUpdate.model_validate(overrides[prefix])
+            provider = provider.model_copy(update={"base_url": patch.base_url, "timeout_seconds": patch.timeout_seconds})
+            model = patch.model
     except (OSError, ValueError, KeyError):
         raise ChatError("请检查本地 plugins/ai_chat/config.json 中的服务商、触发词和模型配置") from None
     reply, elapsed = complete(provider, model, route.provider, prompt, settings.reply_prefix, request_id=request_id)

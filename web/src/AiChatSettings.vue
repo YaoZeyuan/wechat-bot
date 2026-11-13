@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { Input as AInput, InputNumber as AInputNumber, InputTag as AInputTag, Select as ASelect, Switch as ASwitch } from '@arco-design/web-vue'
 import { api, type AiChatRoute } from './api'
 
+const props = defineProps<{ groupId: string }>()
 const routes = ref<AiChatRoute[]>([])
 const draft = ref<AiChatRoute>()
 const busy = ref(false)
@@ -24,7 +25,7 @@ async function load() {
   busy.value = true
   error.value = ''
   try {
-    routes.value = await api.aiChatRoutes()
+    routes.value = await api.aiChatRoutes(props.groupId)
     select(routes.value[0]?.id ?? '')
   } catch (cause) {
     error.value = (cause as Error).message
@@ -39,7 +40,7 @@ async function save() {
   error.value = ''
   try {
     const id = draft.value.id
-    routes.value = await api.saveAiChatRoute(draft.value)
+    routes.value = await api.saveAiChatRoute(props.groupId, draft.value)
     select(id)
     saved.value = true
   } catch (cause) {
@@ -54,7 +55,7 @@ onMounted(load)
 <template>
   <section class="routes">
     <h3>模型与触发词</h3>
-    <p>这些参数应用于启用了 AI 问答的所有群。</p>
+    <p>这些参数仅应用于当前群聊。</p>
     <a-alert v-if="error" type="error">{{ error }}</a-alert>
     <form v-if="draft" @submit.prevent="save">
       <label>模型路由

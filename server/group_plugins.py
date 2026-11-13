@@ -18,13 +18,25 @@ LOCK = Lock()
 BEIJING = timezone(timedelta(hours=8))
 RANKINGS = {"daily_activity": "活跃日榜", "total_activity": "活跃总榜", "total_lurkers": "潜水总榜"}
 ACTIVITY_STATS = "activity_stats"
-BUILTINS = (ACTIVITY_STATS, self_intro.PLUGIN_ID)
+BUILTINS = (ACTIVITY_STATS, self_intro.PLUGIN_ID, ai_chat.PLUGIN_ID, chat_summary.PLUGIN_ID)
 
 
 class Settings(BaseModel):
     enabled: bool
     assistant_name: str | None = Field(default=None, max_length=80)
     intro_reply: str | None = Field(default=None, max_length=2500)
+
+
+def ai_routes(group_id):
+    with LOCK:
+        return read_all().get(group_id, {}).get("ai_chat_routes", {})
+
+
+def save_ai_route(group_id, route_id, patch):
+    with LOCK:
+        data = read_all()
+        data.setdefault(group_id, {}).setdefault("ai_chat_routes", {})[route_id] = patch.model_dump(mode="json")
+        write_all(data)
 
 
 def read_all():
@@ -155,7 +167,7 @@ def dispatch(source, automation, event, *, quotes=None):
     legacy = automation.group_plugins(event.group_id)
     replies = []
     summary = None
-    if quotes is None and legacy.get(chat_summary.PLUGIN_ID, False):
+    if quotes is None and config(event.group_id, chat_summary.PLUGIN_ID, legacy).enabled:
         try:
             summary = chat_summary.command(event.text, event.timestamp_ms)
         except ValueError:
@@ -180,7 +192,8 @@ def dispatch(source, automation, event, *, quotes=None):
             except SourceError as exc:
                 text = f"{keyword}暂不可用：{exc}"
         replies.append((ACTIVITY_STATS, text))
-    question = ai_chat.trigger(event.text) if legacy.get(ai_chat.PLUGIN_ID, False) else None
+    overrides = ai_routes(event.group_id)
+    question = ai_chat.trigger(event.text, overrides=overrides) if config(event.group_id, ai_chat.PLUGIN_ID, legacy).enabled else None
     if question:
         replies.append((ai_chat.PLUGIN_ID, ""))
     if not replies:
@@ -205,7 +218,7 @@ def dispatch(source, automation, event, *, quotes=None):
                 author = contacts.get(event.sender_id, {})
                 name_hint = author.get("remark") or author.get("original_name") or ""
                 prompt = ai_chat.format_question(question[1], name_hint, quotes or [])
-                text = ai_chat.answer(question[0], prompt, request_id=str(request_id))
+                text = ai_chat.answer(question[0], prompt, request_id=str(request_id), overrides=overrides)
             except ai_chat.ChatError as exc:
                 text = f"AI 问答暂不可用：{exc}"
         messages = [{"type": "text", "text": text}]

@@ -1,23 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Card as ACard, Empty as AEmpty, InputSearch as AInputSearch, Select as ASelect, Spin as ASpin } from '@arco-design/web-vue'
+import { Card as ACard, Empty as AEmpty, InputSearch as AInputSearch, Spin as ASpin } from '@arco-design/web-vue'
 import { IconApps, IconSettings, IconRefresh } from '@arco-design/web-vue/es/icon'
-import { api, type GroupPlugin, type MonitoredGroup } from './api'
-import PluginSettings from './PluginSettings.vue'
-import AiChatSettings from './AiChatSettings.vue'
-import SummaryPreview from './SummaryPreview.vue'
+import { api } from './api'
 
 const route = useRoute()
 const router = useRouter()
 const plugins = ref<Awaited<ReturnType<typeof api.pluginCatalog>>>([])
-const groups = ref<MonitoredGroup[]>([])
-const groupPlugins = ref<GroupPlugin[]>([])
 const search = ref('')
 const loading = ref(false)
-const groupLoading = ref(false)
 const error = ref('')
-const groupError = ref('')
 const groupId = computed(() => typeof route.query.group === 'string' ? route.query.group : '')
 const filtered = computed(() => {
   const term = search.value.trim().toLowerCase()
@@ -25,49 +18,21 @@ const filtered = computed(() => {
     .some(value => value.toLowerCase().includes(term)))
 })
 const active = computed(() => plugins.value.find(plugin => plugin.id === route.query.plugin) ?? filtered.value[0])
-const settings = computed(() => groupPlugins.value.find(plugin => plugin.id === active.value?.id))
-const groupOptions = computed(() => groups.value.map(group => ({
-  value: group.group_id,
-  label: (group.remark || group.original_name || group.name) + (group.enabled ? '' : '（已暂停）'),
-})))
 
 function select(plugin: string, group = groupId.value) {
   void router.replace({ query: { ...(plugin ? { plugin } : {}), ...(group ? { group } : {}) } })
 }
 
-async function loadGroup(id: string, onCleanup?: (cleanup: () => void) => void) {
-  let stale = false
-  onCleanup?.(() => { stale = true })
-  groupPlugins.value = []
-  groupError.value = ''
-  groupLoading.value = !!id
-  if (!id) return
-  try {
-    const result = await api.groupPlugins(id)
-    if (!stale && groupId.value === id) groupPlugins.value = result
-  } catch (cause) {
-    if (!stale) groupError.value = (cause as Error).message
-  } finally {
-    if (!stale) groupLoading.value = false
-  }
-}
-watch(groupId, (id, _, cleanup) => void loadGroup(id, cleanup), { immediate: true })
-
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [catalog, monitored] = await Promise.all([api.pluginCatalog(), api.monitoredGroups()])
-    plugins.value = catalog
-    groups.value = monitored
+    plugins.value = await api.pluginCatalog()
   } catch (cause) {
     error.value = (cause as Error).message
   } finally {
     loading.value = false
   }
-}
-function update(plugin: GroupPlugin) {
-  groupPlugins.value = groupPlugins.value.map(item => item.id === plugin.id ? plugin : item)
 }
 onMounted(load)
 </script>
@@ -89,7 +54,6 @@ onMounted(load)
               <button type="button" :aria-pressed="active?.id === plugin.id" @click="select(plugin.id)">
                 <span class="plugin-icon"><icon-apps /></span>
                 <span class="list-label"><strong>{{ plugin.name }}</strong><small>{{ plugin.capability }}</small></span>
-                <a-tag v-if="groupPlugins.find(item => item.id === plugin.id)?.enabled" size="small" color="green">启用</a-tag>
               </button>
             </li>
           </ul>
@@ -107,20 +71,7 @@ onMounted(load)
           <a-tag>{{ active.capability }}</a-tag>
           <a-tag>{{ active.default_enabled ? '默认启用' : '默认关闭' }}</a-tag>
         </div>
-        <div class="scope">
-          <label for="plugin-group">配置群聊</label>
-          <a-select id="plugin-group" :model-value="groupId || undefined" :options="groupOptions"
-            placeholder="请选择监听群" allow-search allow-clear
-            @update:model-value="select(active.id, typeof $event === 'string' ? $event : '')" />
-          <RouterLink v-if="groupId" :to="{ path: '/group', query: { group: groupId } }">打开群配置</RouterLink>
-          <RouterLink v-else to="/rules">查看监听群</RouterLink>
-        </div>
-        <a-alert v-if="groupError" type="error">{{ groupError }}</a-alert>
-        <a-spin v-if="groupLoading" />
-        <PluginSettings v-else-if="settings" :key="`${groupId}:${settings.id}`" :plugin="settings" :group-id="groupId" @saved="update" />
-        <p v-else-if="!groupError" class="muted">选择一个监听群后即可编辑此插件。</p>
-        <AiChatSettings v-if="active.id === 'ai_chat'" />
-        <SummaryPreview v-if="active.id === 'chat_summary'" :group-id="groupId" />
+        <RouterLink :to="{ path: '/group', query: groupId ? { group: groupId, plugin: active.id } : {} }">前往群配置</RouterLink>
       </a-card>
     </div>
   </main>

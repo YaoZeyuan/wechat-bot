@@ -38,25 +38,32 @@ from .reply import SendTask
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
 
 
-@router.get("/plugins/ai_chat/routes")
-def get_ai_chat_routes():
+@router.get("/monitored-groups/{group_id}/plugins/ai_chat/routes")
+def get_ai_chat_routes(group_id: str):
     try:
-        return ai_chat.route_settings()
+        return ai_chat.route_settings(builtin_plugins.ai_routes(group_id))
     except (OSError, ValueError, KeyError):
         raise HTTPException(422, "AI 问答配置无效，请检查本机配置文件") from None
 
 
-@router.put("/plugins/ai_chat/routes/{route_id}")
-def set_ai_chat_route(route_id: str, patch: ai_chat.RouteUpdate):
+@router.put("/monitored-groups/{group_id}/plugins/ai_chat/routes/{route_id}")
+def set_ai_chat_route(group_id: str, route_id: str, patch: ai_chat.RouteUpdate):
     try:
-        ai_chat.update_route(route_id, patch)
+        if not any(item["group_id"] == group_id for item in automation.monitored_groups()):
+            raise HTTPException(404, "未找到监听群")
+        if route_id not in ai_chat.editable_settings().routes:
+            raise KeyError(route_id)
+        url = patch.base_url
+        if url.scheme != "https" or url.username or url.password or url.query or url.fragment:
+            raise ValueError("Invalid API Base")
+        builtin_plugins.save_ai_route(group_id, route_id, patch)
     except KeyError:
         raise HTTPException(404, "未找到 AI 问答路由") from None
     except ValueError:
         raise HTTPException(422, "AI 问答配置无效，请检查模型参数和 API Base") from None
     except OSError:
         raise HTTPException(502, "无法保存 AI 问答配置") from None
-    return get_ai_chat_routes()
+    return get_ai_chat_routes(group_id)
 
 
 class SummaryPreview(BaseModel):

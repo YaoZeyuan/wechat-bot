@@ -185,9 +185,9 @@ export interface SenderHistoryItem {
 }
 
 export const api = {
-  aiChatRoutes: () => request<AiChatRoute[]>('/reader/plugins/ai_chat/routes'),
-  saveAiChatRoute: (route: AiChatRoute) => request<AiChatRoute[]>(
-    `/reader/plugins/ai_chat/routes/${encodeURIComponent(route.id)}`, {
+  aiChatRoutes: (groupId: string) => request<AiChatRoute[]>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins/ai_chat/routes`),
+  saveAiChatRoute: (groupId: string, route: AiChatRoute) => request<AiChatRoute[]>(
+    `/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins/ai_chat/routes/${encodeURIComponent(route.id)}`, {
       method: 'PUT', body: JSON.stringify({
         base_url: route.base_url, timeout_seconds: route.timeout_seconds, model: route.model,
         prefixes: route.prefixes, strip_prefixes: route.strip_prefixes,

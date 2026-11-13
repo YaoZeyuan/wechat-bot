@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import PluginSettings from './PluginSettings.vue'
+import AiChatSettings from './AiChatSettings.vue'
+import SummaryPreview from './SummaryPreview.vue'
 import GlobalAiConfig from './GlobalAiConfig.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -15,6 +18,7 @@ const interval = ref<number | ''>()
 const monitored = ref<MonitoredGroup[]>([])
 const currentGroup = computed(() => monitored.value.find(group => group.group_id === groupId.value))
 const enabledCount = computed(() => monitored.value.filter(group => group.enabled).length)
+const activePlugin = ref('')
 const plugins = ref<GroupPlugin[]>([])
 const pluginError = ref('')
 const refreshError = ref('')
@@ -24,6 +28,7 @@ let refreshing = false
 watch(() => currentGroup.value?.group_id, async (id, _, onCleanup) => {
   let stale = false
   onCleanup(() => { stale = true })
+  activePlugin.value = typeof route.query.plugin === 'string' ? route.query.plugin : ''
   plugins.value = []
   pluginError.value = ''
   if (!id) return
@@ -180,7 +185,13 @@ onUnmounted(() => window.clearInterval(refreshTimer))
             <li v-for="plugin in plugins" :key="plugin.id">
               <div class="identity"><strong>{{ plugin.name }}</strong><small>{{ plugin.description }}</small></div>
               <a-tag :color="plugin.enabled ? 'green' : 'gray'">{{ plugin.enabled ? '启用' : '停用' }}</a-tag>
-              <RouterLink :to="{ path: '/plugins', query: { plugin: plugin.id, group: currentGroup.group_id } }">配置</RouterLink>
+              <a-button size="small" @click="activePlugin = activePlugin === plugin.id ? '' : plugin.id">配置</a-button>
+              <div v-if="activePlugin === plugin.id" style="flex-basis: 100%">
+                <PluginSettings :key="`${groupId}:${plugin.id}`" :plugin="plugin" :group-id="groupId"
+                  @saved="updated => plugins = plugins.map(item => item.id === updated.id ? updated : item)" />
+                <AiChatSettings v-if="plugin.id === 'ai_chat'" :key="groupId" :group-id="groupId" />
+                <SummaryPreview v-if="plugin.id === 'chat_summary'" :group-id="groupId" />
+              </div>
             </li>
           </ul>
         </template>
