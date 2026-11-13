@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Card as ACard, Empty as AEmpty, InputSearch as AInputSearch, Spin as ASpin } from '@arco-design/web-vue'
+import { Card as ACard, Empty as AEmpty, InputSearch as AInputSearch, Spin as ASpin, Switch as ASwitch, Input as AInput, Textarea as ATextarea } from '@arco-design/web-vue'
 import { IconApps, IconSettings, IconRefresh } from '@arco-design/web-vue/es/icon'
 import { api } from './api'
 
@@ -18,6 +18,36 @@ const filtered = computed(() => {
     .some(value => value.toLowerCase().includes(term)))
 })
 const active = computed(() => plugins.value.find(plugin => plugin.id === route.query.plugin) ?? filtered.value[0])
+const saving = ref(false)
+const saved = ref(false)
+const draft = ref({ global_enabled: true, enabled: false, assistant_name: '', intro_reply: '' })
+watch(active, plugin => {
+  draft.value = {
+    global_enabled: plugin?.global_enabled ?? true,
+    enabled: plugin?.default_enabled ?? false,
+    assistant_name: plugin?.assistant_name ?? '',
+    intro_reply: plugin?.intro_reply ?? '',
+  }
+  saved.value = false
+})
+
+async function save() {
+  if (!active.value || saving.value) return
+  const id = active.value.id
+  saving.value = true
+  saved.value = false
+  error.value = ''
+  try {
+    const updated = await api.savePluginDefaults(id, draft.value)
+    plugins.value = plugins.value.map(plugin => plugin.id === id ? updated : plugin)
+    await Promise.resolve()
+    saved.value = active.value?.id === id
+  } catch (cause) {
+    error.value = (cause as Error).message
+  } finally {
+    saving.value = false
+  }
+}
 
 function select(plugin: string, group = groupId.value) {
   void router.replace({ query: { ...(plugin ? { plugin } : {}), ...(group ? { group } : {}) } })
@@ -40,7 +70,7 @@ onMounted(load)
 <template>
   <main class="page plugin-page">
     <header class="plugin-header">
-      <div><h1>插件管理</h1><p>浏览插件，按群配置启用状态和参数。</p></div>
+      <div><h1>插件管理</h1><p>管理全局开关和各群继承的默认配置。</p></div>
       <a-button :loading="loading" @click="load"><template #icon><icon-refresh /></template>刷新目录</a-button>
     </header>
     <a-alert v-if="error" type="error">{{ error }}</a-alert>
@@ -69,8 +99,27 @@ onMounted(load)
         <p>{{ active.description }}</p>
         <div class="detail-tags">
           <a-tag>{{ active.capability }}</a-tag>
-          <a-tag>{{ active.default_enabled ? '默认启用' : '默认关闭' }}</a-tag>
         </div>
+        <form class="defaults" @submit.prevent="save">
+          <label class="setting"><span>全局启用<small>关闭后，所有群暂停运行此插件。</small></span>
+            <a-switch v-model="draft.global_enabled" aria-label="全局启用" :disabled="saving" />
+          </label>
+          <label class="setting"><span>默认启用<small>适用于尚未设置开关的群。</small></span>
+            <a-switch v-model="draft.enabled" aria-label="默认启用" :disabled="saving" />
+          </label>
+          <template v-if="active.fields?.length">
+            <h3>默认参数</h3>
+            <p>尚未保存本群参数的群会使用这些值。</p>
+            <label v-for="field in active.fields" :key="field.key" class="parameter">
+              {{ field.label }}
+              <a-textarea v-if="field.type === 'textarea'" v-model="draft[field.key]" :max-length="field.max_length" :disabled="saving" />
+              <a-input v-else v-model="draft[field.key]" :max-length="field.max_length" :disabled="saving" />
+            </label>
+          </template>
+          <div class="scope"><a-button type="primary" html-type="submit" :loading="saving">保存配置</a-button>
+            <span v-if="saved" role="status">配置已保存</span>
+          </div>
+        </form>
         <RouterLink :to="{ path: '/group', query: groupId ? { group: groupId, plugin: active.id } : {} }">前往群配置</RouterLink>
       </a-card>
     </div>
@@ -97,6 +146,10 @@ onMounted(load)
 .plugin-icon.large { width: 48px; height: 48px; font-size: 21px; }
 .list-label { display: grid; gap: 3px; flex: 1; }
 .scope { margin: 20px 0 14px; }
+.defaults { margin-top: 16px; }
+.setting { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--color-border-2); }
+.setting small { display: block; margin-top: 4px; }
+.parameter { display: grid; gap: 6px; margin-top: 12px; }
 .scope :deep(.arco-select-view) { flex: 0 1 280px; min-width: 0; }
 .detail :deep(.arco-card-body) { padding: clamp(16px, 2.4vw, 28px); }
 .detail-title > div { min-width: 0; overflow-wrap: anywhere; }

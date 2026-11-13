@@ -119,6 +119,7 @@ export interface ConversationDetails {
 }
 
 export interface GroupPlugin {
+  global_enabled?: boolean
   group?: string
   order?: number
   id: string
@@ -236,6 +237,11 @@ export const api = {
   sendFromConsole: (payload: SendPayload) =>
     request<SendResult>('/sender/send', { method: 'POST', body: JSON.stringify(payload) }),
   pluginCatalog: () => request<(Omit<GroupPlugin, 'enabled'> & { default_enabled: boolean })[]>('/reader/plugins'),
+  savePluginDefaults: (pluginId: string, settings: { global_enabled: boolean; enabled: boolean;
+    assistant_name?: string | null; intro_reply?: string | null }) =>
+    request<Omit<GroupPlugin, 'enabled'> & { default_enabled: boolean }>(`/reader/plugins/${encodeURIComponent(pluginId)}`, {
+      method: 'PUT', body: JSON.stringify(settings),
+    }),
   conversationDetails: (session_id: string) =>
     request<ConversationDetails>(`/reader/history/details?${new URLSearchParams({ session_id })}`),
   groupPlugins: (groupId: string) =>

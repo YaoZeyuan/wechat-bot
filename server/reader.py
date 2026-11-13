@@ -258,7 +258,23 @@ def preview_rule(request: RulePreview) -> dict:
 
 @router.get("/plugins")
 def list_plugins() -> list[dict]:
-    return [{"id": plugin_id, **metadata} for plugin_id, metadata in PLUGINS.items()]
+    return [plugin_catalog_item(plugin_id) for plugin_id in PLUGINS]
+
+
+def plugin_catalog_item(plugin_id: str) -> dict:
+    settings = builtin_plugins.defaults(plugin_id)
+    return {"id": plugin_id, **PLUGINS[plugin_id], "default_enabled": settings.enabled,
+            **settings.model_dump(exclude={"enabled"})}
+
+
+@router.put("/plugins/{plugin_id}")
+def update_plugin_defaults(plugin_id: str, settings: builtin_plugins.Defaults) -> dict:
+    if plugin_id not in PLUGINS:
+        raise HTTPException(404, "未找到所选插件")
+    builtin_plugins.save_defaults(plugin_id, settings)
+    log.info("desktop_plugin_defaults_changed", plugin_id=plugin_id,
+             enabled=settings.enabled, global_enabled=settings.global_enabled)
+    return plugin_catalog_item(plugin_id)
 
 
 class MockMessage(BaseModel):
@@ -451,7 +467,7 @@ class GroupPluginSettings(builtin_plugins.Settings):
 def list_group_plugins(group_id: str) -> list[dict]:
     settings = automation.group_plugins(group_id)
     return [
-        {"id": plugin_id, **meta, **(
+        {"id": plugin_id, **meta, "global_enabled": builtin_plugins.defaults(plugin_id).global_enabled, **(
             builtin_plugins.config(group_id, plugin_id, settings).model_dump() if plugin_id in builtin_plugins.BUILTINS else
             {"enabled": settings.get(plugin_id, meta["default_enabled"])}
         )}
@@ -465,8 +481,13 @@ def update_group_plugin(group_id: str, plugin_id: str, settings: GroupPluginSett
         raise HTTPException(404, "未找到所选群或插件")
     if plugin_id in builtin_plugins.BUILTINS:
         if plugin_id == "self_intro" and settings.enabled:
-            name = (settings.assistant_name or "").strip()
-            if not name or name.startswith("@") or not (settings.intro_reply or "").strip():
+            if not settings.model_fields_set.intersection({"assistant_name", "intro_reply"}):
+                inherited = builtin_plugins.config(group_id, plugin_id, automation.group_plugins(group_id))
+                name_value, reply_value = inherited.assistant_name, inherited.intro_reply
+            else:
+                name_value, reply_value = settings.assistant_name, settings.intro_reply
+            name = (name_value or "").strip()
+            if not name or name.startswith("@") or not (reply_value or "").strip():
                 raise HTTPException(422, "请输入助手名字（无需填写 @）和介绍文案")
         builtin_plugins.save(group_id, plugin_id, settings)
     else:

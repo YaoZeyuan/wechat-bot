@@ -230,7 +230,10 @@ class Automation:
                 "SELECT enabled FROM group_plugins WHERE group_id=? AND plugin_id=?",
                 (event.group_id, rule.handler),
             ).fetchone()
-            enabled = rule.handler in PLUGINS and (bool(plugin["enabled"]) if plugin is not None else PLUGINS[rule.handler]["default_enabled"])
+            from .group_plugins import defaults
+
+            policy = defaults(rule.handler) if rule.handler in PLUGINS else None
+            enabled = policy and policy.global_enabled and (bool(plugin["enabled"]) if plugin is not None else policy.enabled)
             if not enabled:
                 return "unmatched"
             inserted = db.execute(

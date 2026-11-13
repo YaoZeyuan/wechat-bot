@@ -12,6 +12,7 @@ from .plugin import ai_chat
 from .plugin import chat_summary
 from .ciphertalk import SourceError
 from .plugin import self_intro
+from .plugins import PLUGINS
 
 PATH = Path(__file__).resolve().parents[1] / "local-data" / "group-plugins.json"
 LOCK = Lock()
@@ -25,6 +26,28 @@ class Settings(BaseModel):
     enabled: bool
     assistant_name: str | None = Field(default=None, max_length=80)
     intro_reply: str | None = Field(default=None, max_length=2500)
+
+
+class Defaults(Settings):
+    enabled: bool = False
+    global_enabled: bool = True
+
+
+def defaults(plugin_id, data=None):
+    if data is None:
+        with LOCK:
+            data = read_all()
+    return Defaults.model_validate({
+        "enabled": PLUGINS[plugin_id]["default_enabled"],
+        **data.get("_defaults", {}).get(plugin_id, {}),
+    })
+
+
+def save_defaults(plugin_id, settings):
+    with LOCK:
+        data = read_all()
+        data.setdefault("_defaults", {})[plugin_id] = settings.model_dump()
+        write_all(data)
 
 
 def ai_routes(group_id):
@@ -45,22 +68,27 @@ def read_all():
     return json.loads(PATH.read_text(encoding="utf-8"))
 
 
-def config(group_id, plugin_id, legacy):
-    with LOCK:
-        stored = read_all().get(group_id, {})
-        value = stored.get(plugin_id)
-    if value is not None:
-        return Settings.model_validate(value)
-    if plugin_id == ACTIVITY_STATS:
-        return Settings(enabled=any(stored.get(key, {}).get("enabled", legacy.get(key, False)) for key in RANKINGS))
-    return Settings(enabled=legacy.get(plugin_id, False))
+def config(group_id, plugin_id, legacy, data=None):
+    if data is None:
+        with LOCK:
+            data = read_all()
+    stored = data.get(group_id, {})
+    value = stored.get(plugin_id)
+    inherited = defaults(plugin_id, data).model_dump(exclude={"global_enabled"})
+    if value is not None and any(key in value for key in ("assistant_name", "intro_reply")):
+        inherited.update(assistant_name=value.get("assistant_name"), intro_reply=value.get("intro_reply"))
+    if plugin_id == ACTIVITY_STATS and any(key in stored or key in legacy for key in RANKINGS):
+        inherited["enabled"] = any(stored.get(key, {}).get("enabled", legacy.get(key, False)) for key in RANKINGS)
+    inherited["enabled"] = (value or {}).get("enabled", legacy.get(plugin_id, inherited["enabled"]))
+    return Settings.model_validate(inherited)
 
 
 def save(group_id, plugin_id, settings):
     with LOCK:
         data = read_all()
         fields = None if plugin_id == self_intro.PLUGIN_ID else {"enabled"}
-        data.setdefault(group_id, {})[plugin_id] = settings.model_dump(include=fields, exclude_none=True)
+        current = data.setdefault(group_id, {}).setdefault(plugin_id, {})
+        current.update(settings.model_dump(include=fields, exclude_unset=True))
         write_all(data)
 
 
@@ -165,9 +193,15 @@ def dispatch(source, automation, event, *, quotes=None):
     from .sender_jobs import Job, get_job, queue_job, run, save
 
     legacy = automation.group_plugins(event.group_id)
+    with LOCK:
+        data = read_all()
+    enabled = {
+        plugin_id: config(event.group_id, plugin_id, legacy, data)
+        for plugin_id in BUILTINS if defaults(plugin_id, data).global_enabled
+    }
     replies = []
     summary = None
-    if quotes is None and config(event.group_id, chat_summary.PLUGIN_ID, legacy).enabled:
+    if quotes is None and chat_summary.PLUGIN_ID in enabled and enabled[chat_summary.PLUGIN_ID].enabled:
         try:
             summary = chat_summary.command(event.text, event.timestamp_ms)
         except ValueError:
@@ -177,12 +211,12 @@ def dispatch(source, automation, event, *, quotes=None):
             summary = None
         if summary:
             replies.append((chat_summary.PLUGIN_ID, ""))
-    if quotes is None:
-        intro = config(event.group_id, self_intro.PLUGIN_ID, legacy)
+    if quotes is None and self_intro.PLUGIN_ID in enabled:
+        intro = enabled[self_intro.PLUGIN_ID]
         if intro.enabled and intro.intro_reply and self_intro.match(event.text, (intro.assistant_name or "").strip()):
             replies.append((self_intro.PLUGIN_ID, intro.intro_reply))
     for behavior, keyword in RANKINGS.items():
-        if quotes is not None or event.text != keyword or not config(event.group_id, ACTIVITY_STATS, legacy).enabled:
+        if quotes is not None or event.text != keyword or ACTIVITY_STATS not in enabled or not enabled[ACTIVITY_STATS].enabled:
             continue
         if behavior == "daily_activity":
             text = daily_activity(source, event)
@@ -192,8 +226,8 @@ def dispatch(source, automation, event, *, quotes=None):
             except SourceError as exc:
                 text = f"{keyword}暂不可用：{exc}"
         replies.append((ACTIVITY_STATS, text))
-    overrides = ai_routes(event.group_id)
-    question = ai_chat.trigger(event.text, overrides=overrides) if config(event.group_id, ai_chat.PLUGIN_ID, legacy).enabled else None
+    overrides = data.get(event.group_id, {}).get("ai_chat_routes", {})
+    question = ai_chat.trigger(event.text, overrides=overrides) if ai_chat.PLUGIN_ID in enabled and enabled[ai_chat.PLUGIN_ID].enabled else None
     if question:
         replies.append((ai_chat.PLUGIN_ID, ""))
     if not replies:

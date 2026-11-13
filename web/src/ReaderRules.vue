@@ -40,7 +40,7 @@ async function togglePlugin(plugin: GroupPlugin, enabled: boolean) {
   switching.value = true
   pluginError.value = ''
   try {
-    const updated = await api.saveGroupPlugin(id, plugin.id, enabled, plugin.assistant_name, plugin.intro_reply)
+    const updated = await api.saveGroupPlugin(id, plugin.id, enabled)
     if (groupId.value === id) updatePlugin(updated)
   } catch (cause) {
     if (groupId.value === id) pluginError.value = (cause as Error).message
@@ -221,6 +221,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
                     :aria-label="plugin.name" @change="value => togglePlugin(plugin, value === true)" />
                 </div>
                 <p>{{ plugin.description }}</p>
+                <a-tag v-if="plugin.global_enabled === false">全局已停用</a-tag>
                 <a-button size="small" @click="activePlugin = plugin.id">查看详情</a-button>
               </a-card>
             </div>
