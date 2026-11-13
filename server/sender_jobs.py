@@ -409,7 +409,13 @@ def run(job, result):
                         sending = False
                         try:
                             if isinstance(phone, AccessibilitySender):
-                                phone.prepare_chat(target, group=job.target.kind == "group")
+                                original_name = ""
+                                if job.target.kind == "group":
+                                    from server.reader import history_source
+
+                                    details = history_source().conversation_details([job.target.id])
+                                    original_name = details.get(job.target.id, {}).get("original_name") or ""
+                                phone.prepare_chat(target, group=job.target.kind == "group", original_name=original_name)
                             else:
                                 phone.prepare_chat(target)
                         except SendError as exc:

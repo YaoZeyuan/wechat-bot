@@ -98,10 +98,10 @@ class AccessibilitySender:
             raise error_type(result["error"])
         return result
 
-    def prepare_chat(self, target, *, group=False):
+    def prepare_chat(self, target, *, group=False, original_name=""):
         self.progress("通过手机无障碍服务检查首页并定位会话")
         try:
-            self.call("prepare", target=target, group=group)
+            self.call("prepare", target=target, group=group, original_name=original_name)
         except SendError as exc:
             self.progress(f"会话定位失败：{exc}。正在返回微信聊天首页")
             try:

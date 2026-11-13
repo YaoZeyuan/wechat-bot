@@ -20,6 +20,7 @@ public final class Bridge extends AccessibilityService {
     private static LocalServerSocket currentListener;
     private static volatile Bridge activeBridge;
     private String preparedTarget;
+    private String preparedOriginalName = "";
 
     @Override protected void onServiceConnected() {
         android.accessibilityservice.AccessibilityServiceInfo info = getServiceInfo();
@@ -97,7 +98,11 @@ public final class Bridge extends AccessibilityService {
         if (action.equals("share")) return shareAsset(request, target, clicked);
         if (action.equals("prepare")) {
             preparedTarget = null;
-            if (!inChat(target)) locate(target, request.optBoolean("group"));
+            preparedOriginalName = "";
+            if (!inChat(target)) {
+                locate(target, request.optBoolean("group"));
+                if (request.optBoolean("group")) preparedOriginalName = request.optString("original_name");
+            }
             preparedTarget = target;
             require(chatReady(target), "会话校验失败，标题匹配数 " + titles(target).size()
                 + "，可编辑控件数 " + matching(AccessibilityNodeInfo::isEditable).size()
@@ -432,6 +437,12 @@ public final class Bridge extends AccessibilityService {
 
     private boolean chatReady(String target) {
         if (inChat(target)) return true;
+        if (target.equals(preparedTarget) && !preparedOriginalName.isEmpty()
+                && matching(n -> "com.tencent.mm:id/nqs".equals(n.getViewIdResourceName())
+                    && named(preparedOriginalName).test(n)).size() == 1
+                && matching(n -> n.isEditable() && "com.tencent.mm:id/bkk".equals(n.getViewIdResourceName())).size() == 1
+                && matching(n -> "com.tencent.mm:id/fq".equals(n.getViewIdResourceName())
+                    && named("聊天信息").test(n)).size() == 1) return true;
         return "文件传输助手".equals(target) && target.equals(preparedTarget)
             && matching(n -> n.isEditable() && "com.tencent.mm:id/bkk".equals(n.getViewIdResourceName())).size() == 1
             && matching(n -> "com.tencent.mm:id/fq".equals(n.getViewIdResourceName()) && named("聊天信息").test(n)).size() == 1;
