@@ -341,7 +341,7 @@ def resolve_target(target: Target) -> str:
 
 def run(job, result):
     from sender import SendError
-    from sender.accessibility import ShareRejected
+    from sender.accessibility import AccessibilitySender, ShareRejected
     from server.main import _devices, create_sender, sender_console_lock, sender_log
 
     key = str(job.request_id)
@@ -408,7 +408,10 @@ def run(job, result):
                         started_ms = int(time() * 1000)
                         sending = False
                         try:
-                            phone.prepare_chat(target)
+                            if isinstance(phone, AccessibilitySender):
+                                phone.prepare_chat(target, group=job.target.kind == "group")
+                            else:
+                                phone.prepare_chat(target)
                         except SendError as exc:
                             if item.mentions or not hasattr(phone, "share_text"):
                                 raise

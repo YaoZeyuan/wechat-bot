@@ -97,7 +97,7 @@ public final class Bridge extends AccessibilityService {
         if (action.equals("share")) return shareAsset(request, target, clicked);
         if (action.equals("prepare")) {
             preparedTarget = null;
-            if (!inChat(target)) locate(target);
+            if (!inChat(target)) locate(target, request.optBoolean("group"));
             preparedTarget = target;
             require(chatReady(target), "会话校验失败，标题匹配数 " + titles(target).size()
                 + "，可编辑控件数 " + matching(AccessibilityNodeInfo::isEditable).size()
@@ -326,7 +326,7 @@ public final class Bridge extends AccessibilityService {
         return attempts;
     }
 
-    private void locate(String target) throws Exception {
+    private void locate(String target, boolean group) throws Exception {
         returnToHome();
         List<AccessibilityNodeInfo> direct = conversationRows(target);
         require(direct.size() <= 1, "首页有多个同名会话");
@@ -354,10 +354,38 @@ public final class Bridge extends AccessibilityService {
         pause();
         setText(unique(n -> n.isEditable(), "搜索输入框"), target);
         pause();
-        List<AccessibilityNodeInfo> results = conversationRows(target);
+        List<AccessibilityNodeInfo> results = group ? groupSearchRows(target) : conversationRows(target);
+        if (group) require(results.size() == 1, "搜索页「群聊」分区内匹配数为 " + results.size());
         require(results.size() == 1, "目标会话匹配数为 " + results.size());
         click(results.get(0));
         for (int attempt = 0; attempt < 4 && !inChat(target); attempt++) pause();
+    }
+
+    private List<AccessibilityNodeInfo> groupSearchRows(String target) throws Exception {
+        Rect heading = new Rect();
+        unique(named("群聊"), "搜索页群聊分区").getBoundsInScreen(heading);
+        int bottom = getResources().getDisplayMetrics().heightPixels;
+        for (AccessibilityNodeInfo node : matching(n -> named("搜索网络结果").test(n)
+                || named("聊天记录").test(n) || named("联系人").test(n)
+                || named("公众号").test(n) || named("搜一搜").test(n))) {
+            Rect bounds = new Rect();
+            node.getBoundsInScreen(bounds);
+            if (bounds.top >= heading.bottom) bottom = Math.min(bottom, bounds.top);
+        }
+        final int sectionBottom = bottom;
+        java.util.regex.Pattern title = java.util.regex.Pattern.compile(
+            java.util.regex.Pattern.quote(target) + "(?:\\s*[（(]\\d+[）)])?");
+        Set<AccessibilityNodeInfo> rows = new LinkedHashSet<>();
+        for (AccessibilityNodeInfo node : matching(n -> !n.isEditable()
+                && (title.matcher(value(n.getText())).matches()
+                    || title.matcher(value(n.getContentDescription())).matches()))) {
+            AccessibilityNodeInfo row = clickable(node);
+            if (row == null || row.isEditable() || isWebSearch(row)) continue;
+            Rect bounds = new Rect();
+            row.getBoundsInScreen(bounds);
+            if (bounds.top >= heading.bottom && bounds.bottom <= sectionBottom) rows.add(row);
+        }
+        return new ArrayList<>(rows);
     }
 
     private boolean home() {
