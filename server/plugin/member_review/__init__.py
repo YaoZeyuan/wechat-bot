@@ -14,10 +14,10 @@ METADATA = {
 STYLES = {
     "赞美": """请基于这些真实发言，写一段五段式赞美，每段单独一行，用「- 」开头。要求：
 - 每段聚焦一个不同角度，五段角度不重复，例如：
-  1. 好奇心/求知欲（遇到新东西会追问、想搞明白）
-  2. 说话方式/性格（直接、坦率、不端着、认错干脆）
-  3. 思维方式（能把技术落地到实际关切，考虑风险、成本、可行性）
-  4. 情感/价值观（从聊天里透出的柔软、善意、对生命的体感）
+  1. 好奇心/求知欲
+  2. 说话方式/性格
+  3. 思维方式
+  4. 情感/价值观
   5. 整体印象收尾（一两句总结这个人给人的感觉）
 - 每段 50~80 字，必须引用/呼应他实际说过的话或表现出的具体细节，禁止空泛套话
 - 语气自然像群友聊天，不要官方表扬腔
@@ -88,4 +88,4 @@ def reply(source, event, request_id, trigger, settings):
 
     answer, model, seconds = global_ai.generate(prompt, request_id)
     return {"type": "text", "mentions": [mention],
-            "text": f"\n{answer[:settings.max_chars]}\n\n🕛模型:{model}; 耗时{int(seconds + 0.5)} 秒"}
+            "text": f"\n{answer}\n\n🕛模型:{model}; 耗时{int(seconds + 0.5)} 秒"}
