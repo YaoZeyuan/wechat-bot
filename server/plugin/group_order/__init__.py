@@ -13,8 +13,10 @@ ROOT = Path(__file__).resolve().parents[3] / "local-data"
 LOCK = Lock()
 BEIJING = timezone(timedelta(hours=8))
 INVALID = "警告指令格式不正确，请按警告@xxx Y天格式进行，Y 为 1 至 99 的整数"
-QUERIES = {"警告列表", "信用分", "信用分列表", "党人碑"}
-COMMAND = re.compile(r"(警告|撤销|以无暗者之名净化)\s*@(.+)", re.DOTALL)
+LIST_QUERIES = {"警告列表", "党人碑", "元佑党人碑"}
+QUERIES = LIST_QUERIES | {"信用分", "信用分列表"}
+EMPTY = "本群目前没有生效中的违规记录"
+COMMAND = re.compile(r"(警告|全部撤销|撤销|以无暗者之名净化)\s*@(.+)", re.DOTALL)
 
 
 def matches(text):
@@ -50,7 +52,7 @@ def warning_list(active):
     for row in sorted(active, key=lambda item: item["expires_at"]):
         grouped.setdefault(row["target"]["id"], []).append(row)
     if not grouped:
-        return "当前没有生效中的警告"
+        return EMPTY
     lines = ["⚠️ 累计警告列表"]
     for i, rows in enumerate(sorted(grouped.values(), key=lambda group: group[-1]["expires_at"]), 1):
         latest = stamp(rows[-1]["expires_at"])
@@ -64,6 +66,19 @@ def warning_list(active):
     return "\n".join(lines)
 
 
+def remaining_warnings(records):
+    deadlines = sorted(row["expires_at"] for row in records if row["active"])
+    if not deadlines:
+        return "当前生效警告 0 次"
+    lines = [f"当前生效警告{len(deadlines)}次，最远{stamp(deadlines[-1])} 结束", ""]
+    short = "%m-%d %H:%M:%S"
+    lines.extend(f"- 警告{i} {stamp(deadline, short)} 结束"
+                 for i, deadline in enumerate(deadlines[:3], 1))
+    if len(deadlines) > 3:
+        lines.append(f"- ……以及剩余{len(deadlines) - 3}条警告, 最晚{stamp(deadlines[-1], short)} 结束")
+    return "\n".join(lines)
+
+
 def ranking(records, cutoff):
     grouped = {}
     for row in sorted(records, key=lambda item: item["issued_at"]):
@@ -71,7 +86,7 @@ def ranking(records, cutoff):
             grouped.setdefault(row["target"]["id"], []).append(row)
     top = sorted(grouped.values(), key=lambda rows: (-len(rows), -rows[-1]["issued_at"]))[:10]
     if not top:
-        return "最近30天没有可计分的警告"
+        return EMPTY
     return "\n".join(["信用分列表", *(f'{i}. {display(rows[-1]["target"])} > {len(rows)}次'
                                         for i, rows in enumerate(top, 1))])
 
@@ -126,9 +141,6 @@ def handle(source, event, admins, now):
         original = json.dumps([active, history], ensure_ascii=False)
         archived = {r["id"]: r for r in history["other"] + history["last30day"]}
         active = [r for r in active if r["id"] not in archived]
-        previous = next((r for r in archived.values() if r.get("ended_by_message_id") == event.message_id), None)
-        if previous is not None and action == "撤销":
-            return f"[{display(target)}] 已撤销最近一条生效警告。"
         for row in active:
             if row["expires_at"] <= now:
                 deactivate(row, row["expires_at"], "系统", "超时过期")
@@ -144,14 +156,23 @@ def handle(source, event, admins, now):
                 active.append(record)
             count = sum(r["active"] and r["target"]["id"] == target["id"] for r in active)
             response = f'[{display(target)}] 累计警告{count}次，本次警告{stamp(record["expires_at"])} 结束。'
-        elif action in {"撤销", "以无暗者之名净化"}:
+        elif action in {"撤销", "全部撤销", "以无暗者之名净化"}:
             candidates = [r for r in active if r["target"]["id"] == target["id"] and r["active"]]
-            if action == "撤销":
-                latest = max(reversed(candidates), key=lambda r: r["issued_at"], default=None)
-                if latest:
-                    deactivate(latest, now, actor, "撤销")
-                    latest["ended_by_message_id"] = event.message_id
-                response = f"[{display(target)}] 已撤销最近一条生效警告。" if latest else "该成员没有可撤销的警告"
+            if action in {"撤销", "全部撤销"}:
+                removed = sum(r.get("ended_by_message_id") == event.message_id for r in archived.values())
+                if not removed:
+                    selected = candidates if action == "全部撤销" else sorted(
+                        reversed(candidates), key=lambda r: r["issued_at"], reverse=True
+                    )[:1]
+                    for row in selected:
+                        deactivate(row, now, actor, "撤销")
+                        row["ended_by_message_id"] = event.message_id
+                    removed = len(selected)
+                if removed:
+                    notice = "已撤销最近一条生效警告。" if action == "撤销" else f"已撤销全部 {removed} 条生效警告。"
+                    response = f"[{display(target)}] {notice}\n\n{remaining_warnings(candidates)}"
+                else:
+                    response = "该成员没有可撤销的警告"
             else:
                 candidates = [r for r in [*active, *archived.values()]
                               if r["target"]["id"] == target["id"] and r["issued_at"] >= cutoff
@@ -159,7 +180,7 @@ def handle(source, event, admins, now):
                 for row in candidates:
                     deactivate(row, now, actor, "被无暗者净化")
                 response = f"[{display(target)}] 已净化{len(candidates)}条警告。"
-        elif action == "警告列表":
+        elif action in LIST_QUERIES:
             response = warning_list([r for r in active if r["active"]])
         else:
             response = ranking([*active, *archived.values()], cutoff)
