@@ -123,6 +123,10 @@ onMounted(() => void load(0))
           {{ sources[selected.source] ?? selected.source }} · {{ statuses[detail?.status ?? selected.status] ?? (detail?.status ?? selected.status) }}
           <time v-if="selected.created_ms" :datetime="new Date(selected.created_ms).toISOString()">{{ dateFormat.format(selected.created_ms) }}</time>
         </p>
+        <section v-if="detail?.trigger_text !== undefined">
+          <h3>触发消息</h3>
+          <p style="white-space: pre-wrap; overflow-wrap: anywhere">{{ detail.trigger_text }}</p>
+        </section>
         <a v-if="selected?.source === 'chat_summary' && detail?.steps.includes('PDF 已就绪，等待手机发送')"
           :href="api.senderHistoryPdf(selected.id)" target="_blank" rel="noopener">在新标签页打开 PDF</a>
         <a-button v-if="selected && detail" :disabled="busy || retrying || ['queued', 'running'].includes(detail.status)"

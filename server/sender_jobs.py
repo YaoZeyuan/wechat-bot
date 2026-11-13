@@ -65,6 +65,7 @@ class Job(BaseModel):
     request_id: UUID
     mode: Literal["send", "dry_run"]
     target: Target
+    trigger_text: str | None = None
     messages: list[Annotated[TextMessage | AssetMessage, Field(discriminator="type")]] = Field(min_length=1, max_length=20)
 
     @model_validator(mode="after")
@@ -179,6 +180,8 @@ def queue_job(job: Job, *, strict=True, source="manual"):
     key = str(job.request_id)
     payload = job.model_dump_json()
     result = {"request_id": key, "status": "queued", "steps": [], "items": ["pending"] * len(job.messages)}
+    if job.trigger_text is not None:
+        result["trigger_text"] = job.trigger_text
     with closing(database()) as conn, conn:
         inserted = conn.execute("INSERT OR IGNORE INTO jobs VALUES (?, ?, ?)", (key, payload, json.dumps(result)))
         if not inserted.rowcount:

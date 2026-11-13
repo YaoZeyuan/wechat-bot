@@ -283,7 +283,7 @@ def dispatch(source, automation, event, *, quotes=None):
                 job = Job(version=1, request_id=request_id, mode="send",
                           target={"kind": "group", "id": event.group_id, "name": name},
                           messages=[{"type": "text", "text": "群友评价生成失败"}])
-                result, inserted = queue_job(job, strict=False, source=plugin_id)
+                result, inserted = queue_job(job.model_copy(update={"trigger_text": event.text}), strict=False, source=plugin_id)
                 if inserted:
                     result.update(status="failed", items=["failed"], steps=[f"群友评价失败：{exc}"])
                     save(str(request_id), result)
@@ -295,7 +295,7 @@ def dispatch(source, automation, event, *, quotes=None):
             job = Job(version=1, request_id=request_id, mode="send",
                       target={"kind": "group", "id": event.group_id, "name": name},
                       messages=[{"type": "file", "asset_id": request_id}])
-            result, inserted = queue_job(job, strict=False, source=plugin_id)
+            result, inserted = queue_job(job.model_copy(update={"trigger_text": event.text}), strict=False, source=plugin_id)
             if not inserted:
                 continue
             result["status"] = "running"
@@ -322,6 +322,6 @@ def dispatch(source, automation, event, *, quotes=None):
             mode="send", target={"kind": "group", "id": event.group_id, "name": name},
             messages=messages,
         )
-        result, inserted = queue_job(job, strict=False, source=plugin_id)
+        result, inserted = queue_job(job.model_copy(update={"trigger_text": event.text}), strict=False, source=plugin_id)
         if inserted:
             run(job, result)

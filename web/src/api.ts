@@ -176,6 +176,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 interface SenderJobResult {
+  trigger_text?: string
   status: string
   steps: string[]
   items: string[]
