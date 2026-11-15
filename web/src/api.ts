@@ -250,7 +250,7 @@ export const api = {
     request<ConversationDetails>(`/reader/history/details?${new URLSearchParams({ session_id })}`),
   groupPlugins: (groupId: string) =>
     request<GroupPlugin[]>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins`),
-  groupMembers: (groupId: string) => request<{ id: string; name: string }[]>(
+  groupMembers: (groupId: string) => request<{ id: string; name: string; group_nickname: string; original_name?: string; remark?: string }[]>(
     `/reader/monitored-groups/${encodeURIComponent(groupId)}/members`),
   saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean, assistant_name?: string | null, intro_reply?: string | null, history_count?: number, max_chars?: number, admin_ids?: string[]) =>
     request<GroupPlugin>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins/${encodeURIComponent(pluginId)}`, {

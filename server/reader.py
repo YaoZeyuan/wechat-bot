@@ -487,7 +487,8 @@ def list_group_members(group_id: str) -> list[dict]:
     except SourceError as exc:
         raise HTTPException(502, str(exc)) from exc
     return sorted([
-        {"id": user_id, "name": names.get(user_id) or contacts.get(user_id, {}).get("original_name") or user_id}
+        {"id": user_id, "name": names.get(user_id) or contacts.get(user_id, {}).get("original_name") or user_id,
+         "group_nickname": names.get(user_id) or "", **contacts.get(user_id, {})}
         for user_id in ids
     ], key=lambda member: (member["name"].casefold(), member["id"]))
 

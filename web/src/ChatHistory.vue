@@ -9,6 +9,33 @@ const filters = [
 const query = ref('')
 const kind = ref('all')
 const conversations = ref<Conversation[]>([])
+type Member = Awaited<ReturnType<typeof api.groupMembers>>[number]
+const memberList = ref<Member[]>([])
+const memberDetail = ref<Member>()
+const membersVisible = ref(false)
+const membersBusy = ref(false)
+const membersError = ref('')
+const memberQuery = ref('')
+const filteredMembers = computed(() => memberList.value.filter(member =>
+  [member.name, member.id, member.original_name, member.remark].some(
+    value => value?.toLowerCase().includes(memberQuery.value.trim().toLowerCase()))))
+
+async function showMembers(id: string) {
+  membersVisible.value = true
+  membersBusy.value = true
+  membersError.value = ''
+  memberQuery.value = ''
+  memberDetail.value = undefined
+  memberList.value = []
+  try {
+    memberList.value = await api.groupMembers(id)
+  } catch (error) {
+    membersError.value = (error as Error).message
+  } finally {
+    membersBusy.value = false
+  }
+}
+
 const selected = ref<Conversation>()
 const route = useRoute()
 const detailsVisible = ref(false)
@@ -236,6 +263,7 @@ onMounted(async () => {
                   </span>
                 </template>
               </template>
+              <a-button v-if="selected.kind === 'group'" :loading="membersBusy" @click="showMembers(selected.id)">群成员</a-button>
               <a-button @click="showDetails">详情</a-button>
               <a-button @click="showExport(selected)">导出</a-button>
               <a-button :loading="messagesBusy" @click="openConversation(selected)">刷新</a-button>
@@ -296,6 +324,28 @@ onMounted(async () => {
         <a-alert v-if="exportError" type="error">{{ exportError }}</a-alert>
         <a-button type="primary" html-type="submit" :loading="exportBusy">下载 TXT</a-button>
       </form>
+    </a-modal>
+    <a-modal v-model:visible="membersVisible" title="群成员" :footer="false">
+      <a-alert v-if="membersError" type="error">{{ membersError }}</a-alert>
+      <p v-else-if="membersBusy" role="status">正在读取群成员…</p>
+      <template v-else-if="memberDetail">
+        <a-button @click="memberDetail = undefined">返回列表</a-button>
+        <dl style="overflow-wrap: anywhere">
+          <dt>成员 ID</dt><dd>{{ memberDetail.id }}</dd>
+          <dt>群昵称</dt><dd>{{ memberDetail.group_nickname || '未设置' }}</dd>
+          <dt>微信昵称</dt><dd>{{ memberDetail.original_name || '未设置' }}</dd>
+          <dt>本机备注</dt><dd>{{ memberDetail.remark || '未设置' }}</dd>
+        </dl>
+      </template>
+      <template v-else>
+        <input v-model="memberQuery" placeholder="搜索昵称、备注或成员 ID" aria-label="搜索群成员" />
+        <p>显示 {{ filteredMembers.length }} / {{ memberList.length }} 位成员</p>
+        <ul style="max-height: 50vh; overflow-y: auto">
+          <li v-for="member in filteredMembers" :key="member.id">
+            {{ member.name }} <a-button size="mini" @click="memberDetail = member">查看详情</a-button>
+          </li>
+        </ul>
+      </template>
     </a-modal>
     <a-modal v-model:visible="detailsVisible" title="会话详情" :footer="false">
       <a-alert v-if="detailsError" type="error">{{ detailsError }}</a-alert>
