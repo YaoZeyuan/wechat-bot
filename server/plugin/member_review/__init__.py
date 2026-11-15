@@ -57,7 +57,8 @@ def reply(source, event, request_id, trigger, settings):
         return None
     if not (nickname or username):
         return {"type": "text", "text": "无法确认目标成员的微信昵称。"}
-    mention = {"group_nickname": nickname or username, "username": username or nickname}
+    mention = {"group_nickname": nickname or username, "username": username or nickname,
+               "remark": (contact.get("remark") or "").strip() or None}
     rows = []
     reached_trigger = False
     with closing(source.iter_messages(event.group_id)) as messages:

@@ -121,7 +121,7 @@ public final class Bridge extends AccessibilityService {
             require(mentions.length() > 0 && mentions.length() <= 10, "@成员数量无效");
             for (int i = 0; i < mentions.length(); i++) {
                 JSONObject member = mentions.getJSONObject(i);
-                addMention(target, member.getString("group_nickname"), member.getString("username"), request.optBoolean("mention_progress"), reader, writer);
+                addMention(target, member.getString("group_nickname"), member.getString("username"), member.isNull("remark") ? "" : member.optString("remark"), request.optBoolean("mention_progress"), reader, writer);
             }
             input = unique(AccessibilityNodeInfo::isEditable, "聊天输入框");
             String prefix = value(input.getText()).toString();
@@ -155,7 +155,7 @@ public final class Bridge extends AccessibilityService {
         pause();
     }
 
-    private void addMention(String target, String nickname, String username, boolean progress, BufferedReader reader, PrintWriter writer) throws Exception {
+    private void addMention(String target, String nickname, String username, String remark, boolean progress, BufferedReader reader, PrintWriter writer) throws Exception {
         require(chatReady(target), "@成员前会话标题未匹配");
         AccessibilityNodeInfo input = unique(AccessibilityNodeInfo::isEditable, "聊天输入框");
         String before = input.isShowingHintText() ? "" : value(input.getText()).toString();
@@ -172,9 +172,14 @@ public final class Bridge extends AccessibilityService {
             click(unique(named("搜索"), "@成员搜索入口"));
             pause();
         }
-        List<AccessibilityNodeInfo> candidates = mentionRows(nickname, "群昵称", progress, reader, writer);
-        if (candidates.isEmpty() && !nickname.equals(username)) {
-            candidates = mentionRows(username, "微信昵称", progress, reader, writer);
+        Map<String, String> names = new LinkedHashMap<>();
+        names.put(nickname, "群昵称");
+        if (!remark.isEmpty()) names.putIfAbsent(remark, "备注");
+        names.putIfAbsent(username, "微信昵称");
+        List<AccessibilityNodeInfo> candidates = new ArrayList<>();
+        for (Map.Entry<String, String> entry : names.entrySet()) {
+            candidates = mentionRows(entry.getKey(), entry.getValue(), names.keySet(), progress, reader, writer);
+            if (!candidates.isEmpty()) break;
         }
         require(!candidates.isEmpty(), "未找到匹配的 @成员：" + nickname + " / " + username);
         AccessibilityNodeInfo row = candidates.get(0);
@@ -185,22 +190,27 @@ public final class Bridge extends AccessibilityService {
         require(after.startsWith(before + "@") && after.length() > before.length() + 1, "@成员未写入输入框");
     }
 
-    private List<AccessibilityNodeInfo> mentionRows(String name, String label, boolean progress, BufferedReader reader, PrintWriter writer) throws Exception {
+    private List<AccessibilityNodeInfo> mentionRows(String name, String label, Set<String> names, boolean progress, BufferedReader reader, PrintWriter writer) throws Exception {
         List<AccessibilityNodeInfo> fields = mentionSearchFields();
         AccessibilityNodeInfo search = fields.size() == 1 ? fields.get(0)
             : unique(AccessibilityNodeInfo::isEditable, "@成员搜索框");
         setText(search, name);
         Set<AccessibilityNodeInfo> rows = new LinkedHashSet<>();
-        for (AccessibilityNodeInfo node : matching(n -> !n.isEditable() && named(name).test(n))) {
+        Set<AccessibilityNodeInfo> exactRows = new LinkedHashSet<>();
+        for (AccessibilityNodeInfo node : matching(n -> !n.isEditable() && names.stream().anyMatch(alias -> named(alias).test(n)))) {
             AccessibilityNodeInfo row = clickable(node);
-            if (row != null && !row.isEditable()) rows.add(row);
+            if (row != null && !row.isEditable()) {
+                rows.add(row);
+                if (named(name).test(node)) exactRows.add(row);
+            }
         }
         if (progress) {
             writer.println(new JSONObject().put("progress", "@成员搜索：" + label + "「" + name
-                + "」，精确匹配 " + rows.size() + " 条"));
+                + "」，输入值精确匹配 " + exactRows.size() + " 条，其他名称匹配 "
+                + (rows.size() - exactRows.size()) + " 条"));
             require("ack".equals(reader.readLine()), "@成员搜索截图确认超时");
         }
-        return new ArrayList<>(rows);
+        return new ArrayList<>(exactRows.isEmpty() ? rows : exactRows);
     }
 
     private List<AccessibilityNodeInfo> mentionSearchFields() {

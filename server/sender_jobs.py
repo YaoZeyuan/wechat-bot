@@ -30,6 +30,7 @@ MemberName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=
 class Mention(BaseModel):
     group_nickname: MemberName
     username: MemberName
+    remark: MemberName | None = None
 
 
 class TextMessage(BaseModel):
