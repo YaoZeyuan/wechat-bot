@@ -133,7 +133,9 @@ export interface GroupPlugin {
   intro_reply?: string | null
   history_count?: number
   max_chars?: number
-  fields?: { key: 'assistant_name' | 'intro_reply' | 'history_count' | 'max_chars'; label: string; type: 'input' | 'textarea' | 'number';
+  praise_prefix?: string
+  critique_prefix?: string
+  fields?: { key: 'assistant_name' | 'intro_reply' | 'history_count' | 'max_chars' | 'praise_prefix' | 'critique_prefix'; label: string; type: 'input' | 'textarea' | 'number';
     max_length: number; placeholder?: string; description?: string }[]
 }
 
@@ -242,7 +244,7 @@ export const api = {
     request<SendResult>('/sender/send', { method: 'POST', body: JSON.stringify(payload) }),
   pluginCatalog: () => request<(Omit<GroupPlugin, 'enabled'> & { default_enabled: boolean })[]>('/reader/plugins'),
   savePluginDefaults: (pluginId: string, settings: { global_enabled: boolean; enabled: boolean;
-    assistant_name?: string | null; intro_reply?: string | null; history_count?: number; max_chars?: number }) =>
+    assistant_name?: string | null; intro_reply?: string | null; history_count?: number; max_chars?: number; praise_prefix?: string; critique_prefix?: string }) =>
     request<Omit<GroupPlugin, 'enabled'> & { default_enabled: boolean }>(`/reader/plugins/${encodeURIComponent(pluginId)}`, {
       method: 'PUT', body: JSON.stringify(settings),
     }),
@@ -252,9 +254,9 @@ export const api = {
     request<GroupPlugin[]>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins`),
   groupMembers: (groupId: string) => request<{ id: string; name: string; group_nickname: string; original_name?: string; remark?: string }[]>(
     `/reader/monitored-groups/${encodeURIComponent(groupId)}/members`),
-  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean, assistant_name?: string | null, intro_reply?: string | null, history_count?: number, max_chars?: number, admin_ids?: string[]) =>
+  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean, assistant_name?: string | null, intro_reply?: string | null, history_count?: number, max_chars?: number, admin_ids?: string[], praise_prefix?: string, critique_prefix?: string) =>
     request<GroupPlugin>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins/${encodeURIComponent(pluginId)}`, {
-      method: 'PUT', body: JSON.stringify({ enabled, assistant_name, intro_reply, history_count, max_chars, admin_ids }),
+      method: 'PUT', body: JSON.stringify({ enabled, assistant_name, intro_reply, history_count, max_chars, admin_ids, praise_prefix, critique_prefix }),
     }),
   monitoredGroups: () => request<MonitoredGroup[]>('/reader/monitored-groups'),
   deleteMonitoredGroup: (id: string) =>

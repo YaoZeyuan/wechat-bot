@@ -20,7 +20,7 @@ const filtered = computed(() => {
 const active = computed(() => plugins.value.find(plugin => plugin.id === route.query.plugin) ?? filtered.value[0])
 const saving = ref(false)
 const saved = ref(false)
-const draft = ref({ global_enabled: true, enabled: false, assistant_name: '', intro_reply: '', history_count: 300, max_chars: 300 })
+const draft = ref({ global_enabled: true, enabled: false, assistant_name: '', intro_reply: '', history_count: 300, max_chars: 300, praise_prefix: '', critique_prefix: '' })
 watch(active, plugin => {
   draft.value = {
     global_enabled: plugin?.global_enabled ?? true,
@@ -29,6 +29,8 @@ watch(active, plugin => {
     intro_reply: plugin?.intro_reply ?? '',
     history_count: plugin?.history_count ?? 300,
     max_chars: plugin?.max_chars ?? 300,
+    praise_prefix: plugin?.praise_prefix ?? '',
+    critique_prefix: plugin?.critique_prefix ?? '',
   }
   saved.value = false
 })

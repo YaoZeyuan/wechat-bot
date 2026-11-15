@@ -25,7 +25,8 @@ async function save() {
   error.value = ''
   try {
     const plugin = await api.saveGroupPlugin(props.groupId, draft.value.id, draft.value.enabled,
-      draft.value.assistant_name, draft.value.intro_reply, draft.value.history_count, draft.value.max_chars)
+      draft.value.assistant_name, draft.value.intro_reply, draft.value.history_count, draft.value.max_chars,
+      undefined, draft.value.praise_prefix, draft.value.critique_prefix)
     emit('saved', plugin)
     await Promise.resolve()
     feedback.value = '配置已保存'
