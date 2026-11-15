@@ -229,8 +229,13 @@ def complete(provider: Provider, model: Model, provider_id: str, prompt: str, sy
         context.warning("ai_chat_transport_error", msg="模型接口连接失败或超时",
                         elapsed_seconds=round(perf_counter() - started, 3))
         raise ChatError("模型接口连接失败或超时") from None
-    except (ValueError, KeyError, IndexError, TypeError):
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        context.warning("ai_chat_response_parse_failed", msg="模型响应解析失败",
+                        expected_field="choices[0].message.content",
+                        error_type=type(exc).__name__, error=str(exc))
         raise ChatError("模型接口返回了无法识别的回复") from None
     if not isinstance(text, str) or not text.strip():
+        context.warning("ai_chat_response_content_invalid", msg="模型响应正文为空或类型不符",
+                        content_type=type(text).__name__)
         raise ChatError("模型返回了空回复")
     return text.rstrip(), elapsed

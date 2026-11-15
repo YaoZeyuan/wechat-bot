@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>群聊审判预览</title>
+<style>
+:root{color-scheme:light;--ink:#202820;--muted:#536457;--line:#d5ddd1;--paper:#fbfcf8;--forest:#183c30}
+*{box-sizing:border-box}
+body{margin:0;background:#edf1e9;color:var(--ink);font:16px/1.75 "Microsoft YaHei UI","PingFang SC",system-ui,sans-serif}
+main{width:min(100% - 32px,920px);margin:clamp(24px,6vw,76px) auto}
+header{background:var(--forest);color:#fff;border-radius:20px;padding:clamp(24px,6vw,56px);border-bottom:5px solid #a6c28c}
+h1{font-size:clamp(30px,6vw,54px);line-height:1.2;margin:0;letter-spacing:.04em}
+header p{color:#dbe8d7;margin:12px 0 0;font-size:14px}
+h2{margin:0;font-size:22px}
+small{color:var(--muted);font-size:13px;font-weight:400}
+section,details{background:var(--paper);border:1px solid var(--line);border-radius:14px;margin:12px 0;min-width:0}
+section{padding:clamp(16px,4vw,32px);margin:20px 0 30px;border-top:3px solid #507957}
+summary{padding:14px 18px;cursor:pointer;font-weight:650}
+summary small{display:inline-block;margin-left:10px}
+article{padding:16px 18px;border-top:1px solid var(--line)}
+article,section{overflow:auto;overflow-wrap:anywhere}
+table{border-collapse:collapse;width:100%;font-size:14px;margin-top:14px}
+td,th{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}
+th{background:#e8efe3;color:#264638}
+pre{white-space:pre-wrap;font:inherit;background:#eef2ea;border-radius:8px;padding:14px}
+button{border:1px solid #819887;border-radius:8px;background:white;color:#183c30;padding:7px 12px;font:inherit;font-size:14px;cursor:pointer}
+:focus-visible{outline:2px solid #347a54;outline-offset:3px}
+@media(max-width:480px){summary small{display:block;margin-left:18px}td,th{padding:7px}}
+</style>
+<main><header><h1>群聊审判</h1><p>本地预览 · 示例聊天 · 三份法官裁决复用同一次模型返回</p></header>
+<section><h2>终审汇总</h2><small>$clerk · $seconds 秒</small>$summary</section>
+<details><summary>审判原始内容</summary><article>
+<button type="button" id="copy">复制原始内容</button><pre id="original">$original</pre>
+</article></details>
+$cards
+
+</main><script>
+document.querySelector('#copy').onclick = async (event) => {
+  await navigator.clipboard.writeText(document.querySelector('#original').textContent);
+  event.target.textContent = '已复制';
+};
+</script></html>
