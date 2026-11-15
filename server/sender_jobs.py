@@ -36,6 +36,7 @@ class Mention(BaseModel):
 class TextMessage(BaseModel):
     type: Literal["text"]
     text: str = Field(min_length=1, max_length=256 * 1024)
+    mention_position: Literal["start", "end"] = "end"
     mentions: list[Mention] = Field(default_factory=list, max_length=10)
 
 
@@ -432,11 +433,14 @@ def run(job, result):
                             sending = job.mode == "send"
                             ok = phone.share_text(target, part, group=job.target.kind == "group")
                         else:
-                            if item.mentions and part_index == 1:
+                            if item.mentions and part_index == (1 if item.mention_position == "start" else len(parts)):
                                 if not hasattr(phone, "send_mentions"):
                                     raise SendError("@成员需要手机无障碍 Sender")
                                 sending = job.mode == "send"
-                                ok = phone.send_mentions(target, part, [member.model_dump() for member in item.mentions])
+                                ok = phone.send_mentions(
+                                    target, part, [member.model_dump() for member in item.mentions],
+                                    position=item.mention_position,
+                                )
                             else:
                                 sending = job.mode == "send"
                                 ok = phone.send(target, part, current_chat=True)

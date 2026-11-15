@@ -119,20 +119,27 @@ public final class Bridge extends AccessibilityService {
         if (mentioning) {
             org.json.JSONArray mentions = request.getJSONArray("mentions");
             require(mentions.length() > 0 && mentions.length() <= 10, "@成员数量无效");
+            String position = request.optString("mention_position", "end");
+            require(position.equals("start") || position.equals("end"), "@位置无效");
+            if (position.equals("end")) setText(input, text + "\n");
             for (int i = 0; i < mentions.length(); i++) {
                 JSONObject member = mentions.getJSONObject(i);
                 addMention(target, member.getString("group_nickname"), member.getString("username"), member.isNull("remark") ? "" : member.optString("remark"), request.optBoolean("mention_progress"), reader, writer);
             }
             input = unique(AccessibilityNodeInfo::isEditable, "聊天输入框");
-            String prefix = value(input.getText()).toString();
-            Bundle cursor = new Bundle();
-            cursor.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, prefix.length());
-            cursor.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, prefix.length());
-            if (!input.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, cursor)) {
-                android.util.Log.i("WeChatSender", "微信未接受光标定位，使用选中 @成员后的光标");
+            if (position.equals("end")) {
+                text = value(input.getText()).toString();
+            } else {
+                String prefix = value(input.getText()).toString();
+                Bundle cursor = new Bundle();
+                cursor.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, prefix.length());
+                cursor.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, prefix.length());
+                if (!input.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, cursor)) {
+                    android.util.Log.i("WeChatSender", "微信未接受光标定位，使用选中 @成员后的光标");
+                }
+                paste(input, text);
+                text = prefix + text;
             }
-            paste(input, text);
-            text = prefix + text;
         } else {
             setText(input, text);
         }

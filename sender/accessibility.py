@@ -123,18 +123,19 @@ class AccessibilitySender:
     def send(self, target, text, *, current_chat=False, strict_target=False):
         return self._send_text(target, text, current_chat=current_chat)
 
-    def send_mentions(self, target, text, mentions):
-        self.progress("正在通过微信成员选择器添加 @成员")
-        return self._send_text(target, text, current_chat=True, mentions=mentions)
+    def send_mentions(self, target, text, mentions, *, position="end"):
+        label = "正文之后" if position == "end" else "正文之前"
+        self.progress(f"正在通过微信成员选择器在{label}添加 @成员")
+        return self._send_text(target, text, current_chat=True, mentions=mentions, mention_position=position)
 
-    def _send_text(self, target, text, *, current_chat, mentions=None):
+    def _send_text(self, target, text, *, current_chat, mentions=None, mention_position="end"):
         text = normalize_text(text)
         if not text.strip() or len(text) > self.max_chars:
             raise SendError(f"文字不能为空，且最多 {self.max_chars} 字")
         if not current_chat:
             self.prepare_chat(target)
         self.progress("手机无障碍服务正在校验输入框和完整文本")
-        payload = {"mentions": mentions} if mentions else {}
+        payload = {"mentions": mentions, "mention_position": mention_position} if mentions else {}
         result = self.call("mention_text" if mentions else "text", target=target, text=text, dry_run=self.dry_run, **payload)
         ok = result["ok"]
         conn = init_db(self.database)

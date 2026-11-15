@@ -264,3 +264,7 @@ uv run python -m server.export_history --snapshot local-data/snapshot --account 
 ### 部分手机上的微信无障碍兼容性
 
 在单微信测试机上，系统设置可读但微信只返回空根节点。同时启用系统 TalkBack 后，Sender 读到微信首页的 189 个可见节点，并向文件传输助手实发了一条文字测试。该测试机于 2026-11-11 开启并保留 TalkBack。若同一台手机复现此现象，可在系统无障碍设置中启用 TalkBack，再打开微信。TalkBack 会改变触摸手势，停用后微信节点可能再次缺失。
+
+### 文本消息的 @ 位置
+
+群聊文本消息可用 `mention_position` 指定 `mentions` 的位置。`end` 为默认值，先写正文，再换行添加微信 @；`start` 先添加微信 @，再写正文。长文本分段时，分别在最后一段或第一段添加 @。
