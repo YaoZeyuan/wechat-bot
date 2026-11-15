@@ -5,6 +5,15 @@ import { api, type SenderAiLog, type SenderHistoryItem } from './api'
 const records = ref<SenderHistoryItem[]>([])
 const selected = ref<SenderHistoryItem>()
 const detail = ref<Awaited<ReturnType<typeof api.senderJob>>>()
+const stepClock = new Intl.DateTimeFormat('zh-CN', {
+  hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hourCycle: 'h23',
+})
+function stepTime(index: number) {
+  const start = detail.value?.step_times_ms?.[index]
+  const end = detail.value?.step_times_ms?.[index + 1]
+  if (start == null) return ''
+  return stepClock.format(start) + (end == null || end < start ? '' : ' · ' + ((end - start) / 1000).toFixed(3) + ' 秒')
+}
 const dependencies = {
   adb: 'ADB 手机连接', sender: 'Sender 初始化',
   screen: '手机屏幕', talkback: 'TalkBack', bridge: 'Sender 无障碍通道', wechat: '微信控件',
@@ -182,9 +191,10 @@ onUnmounted(() => window.clearInterval(progressTimer))
           <p v-else-if="!aiLogs">正在读取模型日志…</p>
           <ol v-else>
             <li v-for="(entry, index) in aiLogs" :key="index">
+              <small v-if="entry.timestamp && Number.isFinite(Date.parse(entry.timestamp))">{{ stepClock.format(Date.parse(entry.timestamp)) }} · </small>
               {{ entry.msg }} · {{ entry.provider }} / {{ entry.model }}
               <span v-if="entry.status"> · HTTP {{ entry.status }}</span>
-              <span v-if="entry.elapsed_seconds !== undefined"> · {{ entry.elapsed_seconds }} 秒</span>
+              <span v-if="entry.elapsed_seconds !== undefined"> · {{ entry.elapsed_seconds.toFixed(3) }} 秒</span>
               <details v-if="entry.request_body || entry.response_body">
                 <summary>{{ entry.request_body ? '查看请求' : '查看响应' }}</summary>
                 <small v-if="entry.url">{{ entry.url }}</small>
@@ -195,8 +205,10 @@ onUnmounted(() => window.clearInterval(progressTimer))
           <h3>执行步骤</h3>
         </section>
         <p v-else-if="detail && !detail.steps.length">暂无操作步骤。</p>
+        <p v-if="detail?.step_times_ms?.length" class="hint">步骤耗时按到下一条日志的间隔计算。</p>
         <ol v-if="detail">
           <li v-for="(step, index) in detail.steps" :key="index">
+            <small v-if="stepTime(index)">{{ stepTime(index) }} · </small>
             {{ step }}
             <details v-if="detail.screens?.includes(index)">
               <summary>查看截图</summary>

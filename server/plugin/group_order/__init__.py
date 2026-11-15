@@ -195,6 +195,13 @@ def handle(source, event, admins, now):
         return response
 
 
+def active_warning_count(group_id, user_id, now):
+    with LOCK:
+        records = read(ROOT / group_id / "秩序管理.json", [])
+        return sum(row["target"]["id"] == user_id and row["active"] and row["expires_at"] > now
+                   for row in records)
+
+
 def record_trial_warning(group_id, record):
     directory = ROOT / group_id
     path = directory / "秩序管理.json"

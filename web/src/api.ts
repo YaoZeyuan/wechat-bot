@@ -182,6 +182,7 @@ interface SenderJobResult {
   trigger_text?: string
   status: string
   steps: string[]
+  step_times_ms?: (number | null)[]
   items: string[]
   screens?: number[]
 }

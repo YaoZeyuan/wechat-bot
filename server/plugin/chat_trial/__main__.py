@@ -13,7 +13,7 @@ from string import Template
 from unittest.mock import patch
 
 from markdown_it import MarkdownIt
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictStr
 
 from . import format_elapsed
 from ...global_ai import ChatError, generate
@@ -23,7 +23,7 @@ M002 @U02：我觉得能。你要反对就拿全市数据来。
 M003 @U01：是你先说它有代表性，可以先给出抽样依据吗？
 M004 @U02：你他妈就是个蠢货，别在这儿丢人了。"""
 NAMES = {"@U01": "林同学", "@U02": "周同学"}
-PROMPT = "根据上下文判断发言是否违反就事论事、谁主张谁举证、禁止人身攻击的群规，引用消息编号并给出理由。"
+PROMPT = "根据上下文判断发言是否违反就事论事、谁主张谁举证、禁止人身攻击的群规，指出相关发言并给出理由。"
 MARKDOWN = MarkdownIt("commonmark", {"html": False}).enable("table").disable("image")
 
 
@@ -42,57 +42,46 @@ def render(text, names):
     return MARKDOWN.render(restore_names(text, names))
 
 
-class Violation(BaseModel):
+class WarningNotice(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    message_id: StrictStr
-    reason: StrictStr
-    excerpts: list[StrictStr]
-
-
-class Verdict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    user_id: StrictStr
-    violation: StrictBool
-    violations: list[Violation]
+    uid: StrictStr
+    notify_content: StrictStr
 
 
 class Decision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    verdicts: list[Verdict]
+    verdicts: list[WarningNotice]
 
 
-OUTPUT_RULES = """【固定输出格式】
-仅输出 JSON 对象，例如 {"verdicts":[{"user_id":"U07","violation":true,"violations":[{"message_id":"M042","reason":"结合原文说明违反的群规","excerpts":["法官判词中的原文摘录"]}}]}]}。
-使用原始发言里的成员和消息编号。每位成员最多出现一次，每条违规发言必须有具体原因。没有违规发言时使用空列表。只列出明确违规的成员，每项 violation 必须为 true。没有违规时返回 {"verdicts":[]}。不要输出代码围栏或额外文字。"""
+OUTPUT_RULES = """仅返回 JSON 对象，例如 {"verdicts":[{"uid":"U07","notify_content":"被裁定人：@U07\\n违规动作：……\\n警告原因：……"}]}。
+归纳所有法官一致认定的违规。每位违规成员只返回一条，uid 使用原始发言中的成员代号，notify_content 是可以直接发到群里的完整文案。
+将同一成员的多条违规集中说明。引用或准确转述涉及发言，说明判定依据及执行类型。可以写明已提供的群规和有效期，不得猜测历史次数或编造处罚机制。
+没有一致认定的违规时返回 {"verdicts":[]}。"""
 
 
-def validate_decision(text, evidence, verdicts):
+def validate_decision(text, evidence):
     decision = Decision.model_validate_json(text)
-    users = set()
-    findings = {}
+    members = {row["user_id"]: row.get("wechat_user_id") for row in evidence.values()}
+    notices = []
+    seen = set()
     for verdict in decision.verdicts:
-        if verdict.user_id in users or not verdict.violation or not verdict.violations:
-            raise ValueError("成员重复或违规状态与明细不一致")
-        if not any(row["user_id"] == verdict.user_id for row in evidence.values()):
-            raise ValueError("未知成员代号")
-        users.add(verdict.user_id)
-        for violation in verdict.violations:
-            row = evidence.get(violation.message_id)
-            if not row or row["user_id"] != verdict.user_id:
-                raise ValueError("违规发言编号不存在或作者不匹配")
-            if violation.message_id in findings or not violation.reason.strip():
-                raise ValueError("违规发言重复或缺少原因")
-            if len(violation.excerpts) != len(verdicts) or any(
-                not excerpt.strip() or excerpt not in verdict
-                for excerpt, verdict in zip(violation.excerpts, verdicts)
-            ):
-                raise ValueError("各法官判词摘录缺失或无法核对")
-            findings[violation.message_id] = {"reason": violation.reason, "excerpts": violation.excerpts}
-    return findings
+        uid = verdict.uid.strip().removeprefix("@")
+        if uid not in members or uid in seen:
+            raise ValueError(f"未知或重复成员代号：{uid}")
+        if not verdict.notify_content.strip():
+            raise ValueError(f"{uid} 缺少通知文案")
+        seen.add(uid)
+        notices.append({"uid": uid, "notify_content": verdict.notify_content, "wechat_user_id": members[uid]})
+    return notices
 
 
 def judge_prompt(transcript, intro, rules):
-    return f"【群规】\n{intro}\n{rules}\n\n请用可读判词说明结论，并引用对应成员和消息编号。\n\n【原始发言】\n{transcript}"
+    transcript = re.sub(
+        r"(?m)^M[0-9]+ (@U[0-9]+)：",
+        lambda match: ("\n" if match.start() else "") + match[1] + "：\n",
+        transcript,
+    )
+    return f"【群规】\n{intro}\n{rules}\n\n请给出可读判词，说明涉及的成员、违规发言和判定理由。\n\n【原始发言】\n{transcript}"
 
 
 def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id='', evidence=None, auto_warn=False, request_prefix='', cache_dir=None, on_judges_started=None, progress=lambda message: None):
@@ -152,25 +141,20 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
         results *= 3
     verdicts = [result[0] for result in results]
     judge_text = "\n\n".join(f"法官 {i}\n{text}" for i, text in enumerate(verdicts, 1))
-    summary, clerk, summary_elapsed = call(
-        "书记官",
-        (summary_rules or "汇总法官裁决，用 Markdown 表格对照，保留成员代号并给出处理建议。")
-        + "\n\n" + judge_text,
-        clerk_id,
-    )
-    outcome = None
-    penalty = ""
-    if auto_warn:
+    def summarize():
+        return call(
+            "书记官",
+            (summary_rules or "汇总法官裁决，用 Markdown 表格对照，保留成员代号并给出处理建议。")
+            + "\n\n" + judge_text,
+            clerk_id,
+        )
+
+    def extract_penalties():
         try:
-            prompt = (
-                OUTPUT_RULES + "\n只提取每位法官均明确认定违规的同一条消息。"
-                "reason 会公开发送给群成员，请直接引用或描述违规发言本身，原因中不要出现 M007 等消息编号。"
-                "每条违规需提供 excerpts 数组，按法官顺序逐字引用支持这一裁决的原文片段。"
-                "\n\n" + original + "\n\n" + judge_text
-            )
+            prompt = OUTPUT_RULES + "\n\n" + original + "\n\n" + judge_text
             extracted, _, _ = call("处罚书记官", prompt, clerk_id)
             try:
-                findings = validate_decision(extracted, evidence, verdicts)
+                notices = validate_decision(extracted, evidence)
             except ValueError as exc:
                 progress(f"处罚 JSON 解析或校验失败，正在修正（仅一次） · {exc}")
                 repair = json.dumps({"error": str(exc), "previous_output": extracted}, ensure_ascii=False)
@@ -180,20 +164,13 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
                     "请根据原始证据修正，重新输出一个完整的 JSON 对象，不要附加说明。\n" + repair,
                     clerk_id,
                 )
-                findings = validate_decision(extracted, evidence, verdicts)
+                notices = validate_decision(extracted, evidence)
                 progress("处罚 JSON 修正后已通过校验")
-            by_member = {}
-            for mid, finding in findings.items():
-                row = evidence[mid]
-                by_member.setdefault(row["user_id"], []).append({"message_id": mid, **row, **finding})
-            outcome = {"complete": True, "warnings": [
-                {"user_id": user, "violations": rows} for user, rows in by_member.items()
-            ]}
+            for notice in notices:
+                notice["notify_content"] = restore_names(notice["notify_content"], names)
+            outcome = {"complete": True, "warnings": notices}
             entries = "".join(
-                f"<h3>{escape(names.get('@' + user, user))} · 1 次警告建议</h3><ul>"
-                + "".join(f"<li><blockquote>{escape(row['text'])}</blockquote><p>{escape(row['reason'])}</p></li>"
-                          for row in rows) + "</ul>"
-                for user, rows in by_member.items()
+                f"<article>{render(notice['notify_content'], {})}</article>" for notice in notices
             )
             penalty = entries or "<p>没有符合条件的警告建议。</p>"
         except (ChatError, ValueError) as exc:
@@ -201,7 +178,22 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
             progress(f"处罚提取失败 · {reason}")
             outcome = {"complete": False, "warnings": [], "error": reason}
             penalty = f"<p>处罚提取失败 · {escape(reason)}</p>"
-        penalty = "<section><h2>处罚依据</h2>" + penalty + "</section>"
+        penalty = (
+            '<section><div class="penalty-heading"><h2>处罚依据</h2>'
+            '<button type="button" data-copy="penalty-prompt">复制处罚请求</button></div>'
+            f'<pre id="penalty-prompt" hidden>{escape(prompt)}</pre>{penalty}</section>'
+        )
+        return outcome, penalty
+
+    if auto_warn:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            summary_future = executor.submit(summarize)
+            penalty_future = executor.submit(extract_penalties)
+            summary, clerk, summary_elapsed = summary_future.result()
+            outcome, penalty = penalty_future.result()
+    else:
+        summary, clerk, summary_elapsed = summarize()
+        outcome, penalty = None, ""
     cards = "".join(
         f"<details><summary>裁决 {i}<small>{escape(judge)} · {format_elapsed(elapsed)} 秒</small></summary>"
         f"<article>{render(verdict, names)}</article></details>"
@@ -280,11 +272,15 @@ if __name__ == "__main__":
                 judges=[line.strip() for line in settings.trial_judges.splitlines() if line.strip()],
                 clerk_id=settings.trial_clerk, auto_warn=settings.trial_auto_warn)
     elif args.sample:
-        with patch(__name__ + ".generate", side_effect=[
-            ("U02 的 M004 是人身攻击。", "示例法官", 2),
-            ("| 消息 | 裁决 | 建议 |\n| --- | --- | --- |\n| M004 | 人身攻击 | 提醒 @U02 就事论事 |", "示例书记官", 1),
-            ('{"verdicts":[{"user_id":"U02","violation":true,"violations":[{"message_id":"M004","reason":"人身攻击","excerpts":["U02 的 M004 是人身攻击。","U02 的 M004 是人身攻击。","U02 的 M004 是人身攻击。"]}]}]}', "处罚书记官", 1),
-        ]):
+        def sample_response(prompt, request_id, **options):
+            if options.get("response_format"):
+                return ('{"verdicts":[{"uid":"U02","notify_content":"@U02 使用侮辱性措辞，构成人身攻击。"}]}',
+                        "处罚书记官", 1)
+            if prompt.startswith("【群规】"):
+                return "U02 的发言构成人身攻击。", "示例法官", 2
+            return "提醒 @U02 就事论事。", "示例书记官", 1
+
+        with patch(__name__ + ".generate", side_effect=sample_response):
             preview(output, auto_warn=True)
     else:
         preview(output)

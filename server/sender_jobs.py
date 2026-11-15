@@ -105,9 +105,17 @@ def recover_jobs():
         for key, raw in conn.execute("SELECT id, result FROM jobs WHERE json_extract(result, '$.status') IN ('queued', 'running')"):
             result = json.loads(raw)
             result["status"] = "uncertain" if result["status"] == "running" else "failed"
-            result["steps"].append("服务已重启，任务中断。请先在手机核对发送结果")
+            append_step(result, "服务已重启，任务中断。请先在手机核对发送结果")
             conn.execute("UPDATE jobs SET result = ? WHERE id = ?", (json.dumps(result), key))
     trim_history()
+
+def append_step(result, message):
+    steps = result["steps"]
+    timestamps = result.setdefault("step_times_ms", [])
+    timestamps.extend([None] * (len(steps) - len(timestamps)))
+    timestamps.append(time() * 1000)
+    steps.append(message)
+
 
 def save(key, result):
     with closing(database()) as conn, conn:
@@ -348,6 +356,7 @@ def trim_history():
             result = json.loads(row[0])
             result.pop("screens", None)
             result["steps"] = []
+            result.pop("step_times_ms", None)
             conn.execute("UPDATE jobs SET result=? WHERE id=?", (json.dumps(result), key))
     for (key,) in removed:
         shutil.rmtree(root / "screens" / key, ignore_errors=True)
@@ -403,7 +412,7 @@ def run(job, result, *, continues=False):
                         status=status, detail=detail, msg="Sender 前置检查")
 
     def progress(message):
-        result["steps"].append(message)
+        append_step(result, message)
         if serial:
             try:
                 from adbutils import adb

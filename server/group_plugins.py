@@ -32,7 +32,7 @@ class Settings(BaseModel):
     trial_cooldown: int = Field(default=3, ge=1, le=60)
     trial_intro: str = Field(default=chat_trial.DEFAULT_INTRO, max_length=16000)
     trial_summary: str = Field(default=chat_trial.DEFAULT_SUMMARY, max_length=16000)
-    trial_judges: str = Field(default="qwen3.7-flash\ndeepseek-v4.1-flash\nqwen3.8-27b", max_length=770)
+    trial_judges: str = Field(default="qwen3.7-flash\ndeepseek-v4.1-flash\nqwen3.7-flash", max_length=770)
     trial_warning_hours: int = Field(default=24, ge=1)
     trial_auto_warn: bool = False
     trial_clerk: str = Field(default="qwen3.7-flash", max_length=256)
@@ -241,7 +241,7 @@ def dispatch(source, automation, event, *, quotes=None):
 
     from fastapi import HTTPException
 
-    from .sender_jobs import Job, get_job, queue_job, run, save
+    from .sender_jobs import Job, append_step, get_job, queue_job, run, save
 
     legacy = automation.group_plugins(event.group_id)
     with LOCK:
@@ -348,7 +348,7 @@ def dispatch(source, automation, event, *, quotes=None):
             result["status"] = "running"
 
             def progress(message):
-                result["steps"].append(message)
+                append_step(result, message)
                 save(str(request_id), result)
 
             scope = f"最近 {summary[0]} 条" if isinstance(summary[0], int) else f"{summary[0]} 的"

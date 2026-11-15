@@ -8,7 +8,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 import structlog
 
-from ..group_order import record_trial_warning, write
+from ..group_order import active_warning_count, record_trial_warning, write
 from . import format_elapsed
 from .__main__ import preview, read_group
 
@@ -18,7 +18,7 @@ log = structlog.get_logger("wechat_bot.trial")
 
 def dispatch(source, event, settings, *, retry=False):
     from ...group_plugins import robot_wxid
-    from ...sender_jobs import Job, get_job, queue_job, run, save, stage_local_report
+    from ...sender_jobs import Job, append_step, get_job, queue_job, run, save, stage_local_report
 
     group = event.group_id
     if not group.endswith("@chatroom") or not group.removesuffix("@chatroom").isdigit():
@@ -73,7 +73,7 @@ def dispatch(source, event, settings, *, retry=False):
 
     def progress(message):
         with history_lock:
-            history["steps"].append(message)
+            append_step(history, message)
             save(str(history_id), history)
         log.info("trial_group_step", group_id=group, trial_id=str(trial_id), msg=message)
 
@@ -151,15 +151,14 @@ def dispatch(source, event, settings, *, retry=False):
             return
     for item in warnings:
         try:
-            rows = item["violations"]
-            user_id = rows[0]["wechat_user_id"]
+            user_id = item["wechat_user_id"]
+            reason = item["notify_content"]
             if state["members"].get(user_id, {}).get("recorded"):
                 continue
             contact = source.conversation_details([user_id]).get(user_id, {})
             nickname = nicknames.get(user_id)
             username = contact.get("original_name")
             person = {"id": user_id, "username": username or "", "group_nickname": nickname or ""}
-            reason = "\n".join(f"违规原文：{row['text']}\n原因：{row['reason']}" for row in rows)
             results = state["members"].setdefault(user_id, {})
             progress(f"正在发送 {nickname or username or user_id} 的违规依据")
             started = perf_counter()
@@ -172,7 +171,8 @@ def dispatch(source, event, settings, *, retry=False):
                 continue
             progress(f"正在发送 {nickname or username or user_id} 的 @ 警告")
             started = perf_counter()
-            results["warning"] = send(f"{user_id}:warning", "警告", [{
+            count = active_warning_count(group, user_id, time()) + 1
+            results["warning"] = send(f"{user_id}:warning", f"警告（当前第{count}次警告）", [{
                 "group_nickname": nickname or username, "username": username or nickname,
                 "remark": contact.get("remark") or None,
             }])
@@ -207,7 +207,7 @@ def resume(group, request_id, context):
     from ...group_plugins import Settings
     from ...reader import history_source
     from ...reply import MessageEvent
-    from ...sender_jobs import get_job, save
+    from ...sender_jobs import append_step, get_job, save
 
     try:
         dispatch(history_source(), MessageEvent.model_validate(context["event"]),
@@ -215,6 +215,6 @@ def resume(group, request_id, context):
     except Exception as exc:
         result = get_job(request_id)
         result["status"] = "failed"
-        result["steps"].append(f"续跑失败 · {exc}")
+        append_step(result, f"续跑失败 · {exc}")
         save(str(request_id), result)
         log.exception("trial_resume_failed", group_id=group, request_id=str(request_id))

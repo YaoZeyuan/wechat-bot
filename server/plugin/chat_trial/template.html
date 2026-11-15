@@ -28,10 +28,11 @@ button{border:1px solid #8e9197;border-radius:4px;background:white;color:var(--i
 .original-panel{position:relative}
 .original-panel summary{padding-right:132px;min-height:48px}
 .original-panel button{position:absolute;right:0;top:6px;z-index:1}
+.penalty-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
 </style>
 <main><header><h1>群聊审判</h1></header>
 
-<div class="original-panel"><button type="button" id="copy">复制原始内容</button>
+<div class="original-panel"><button type="button" data-copy="original">复制原始内容</button>
 <details><summary>审判原始内容</summary><article><pre id="original">$original</pre>
 </article></details></div>
 $cards
@@ -39,8 +40,26 @@ $cards
 
 $penalty
 </main><script>
-document.querySelector('#copy').onclick = async (event) => {
-  await navigator.clipboard.writeText(document.querySelector('#original').textContent);
-  event.target.textContent = '已复制';
-};
+for (const button of document.querySelectorAll('button[data-copy]')) {
+  button.onclick = async () => {
+    const content = document.getElementById(button.dataset.copy).textContent;
+    try {
+      await navigator.clipboard.writeText(content);
+      button.textContent = '已复制';
+    } catch {
+      const input = document.createElement('textarea');
+      input.value = content;
+      input.readOnly = true;
+      button.after(input);
+      input.select();
+      if (document.execCommand('copy')) {
+        input.remove();
+        button.focus();
+        button.textContent = '已复制';
+      } else {
+        button.textContent = '请手动复制';
+      }
+    }
+  };
+}
 </script></html>
