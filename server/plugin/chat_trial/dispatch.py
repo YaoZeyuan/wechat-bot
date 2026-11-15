@@ -1,5 +1,6 @@
 """Run a group trial and deliver warning notices before recording penalties."""
 import json
+from threading import Lock
 from pathlib import Path
 from time import time
 from uuid import NAMESPACE_URL, uuid5
@@ -15,7 +16,7 @@ log = structlog.get_logger("wechat_bot.trial")
 
 def dispatch(source, event, settings):
     from ...group_plugins import robot_wxid
-    from ...sender_jobs import Job, get_job, queue_job, run
+    from ...sender_jobs import Job, get_job, queue_job, run, save
 
     group = event.group_id
     if not group.endswith("@chatroom") or not group.removesuffix("@chatroom").isdigit():
@@ -39,7 +40,7 @@ def dispatch(source, event, settings):
                   trigger_text=event.text, messages=[{"type": "text", "text": text, "mentions": mentions or []}])
         result, inserted = queue_job(job, strict=False, source="chat_trial")
         if inserted:
-            run(job, result)
+            run(job, result, continues=key == 'start')
         return get_job(job_id)["status"]
 
     wait = settings.trial_cooldown * 60 - (time() - last.get("time", 0))
@@ -48,27 +49,42 @@ def dispatch(source, event, settings):
 
         send("cooldown", f"距离上轮{last['sender']} 发起的审判间隔不足{settings.trial_cooldown}分钟，请等待{ceil(wait / 60)}分钟后再进行")
         return
-    if send("start", f"开始执行@{sender_name} 发起的审判") != "completed":
+    if send("start", f"开始执行@{sender_name} 发起的审判") != "running":
         return
     write(last_path, {"time": time(), "sender": sender_name})
+    history_id = uuid5(trial_id, "start")
+    history = get_job(history_id)
+    history_lock = Lock()
+
     def progress(message):
+        with history_lock:
+            history["steps"].append(message)
+            save(str(history_id), history)
         log.info("trial_group_step", group_id=group, trial_id=str(trial_id), msg=message)
 
+    def finish(status, message):
+        history["status"] = status
+        progress(message)
+
     try:
+        progress('正在读取审判范围内的群聊记录')
         transcript, names, evidence = read_group(group, settings.trial_hours, settings.trial_limit, before=event)
         outcome = preview(folder / f"{trial_id}.html", transcript, names, evidence=evidence,
                           rules=settings.trial_prompt, intro=settings.trial_intro, summary_rules=settings.trial_summary,
                           judges=settings.trial_judges.splitlines(), clerk_id=settings.trial_clerk,
                           auto_warn=settings.trial_auto_warn, progress=progress)
-    except Exception:
+    except Exception as exc:
+        finish("failed", f"审判失败 · {exc}")
         log.exception("trial_group_failed", group_id=group, trial_id=str(trial_id))
         write(state_path, {"status": "failed"})
         return
 
+    progress("HTML 报告已生成")
     state = {"status": "completed", "members": {}}
     bot = robot_wxid()
     if not bot and (outcome or {}).get("warnings"):
         log.warning("trial_penalties_skipped", group_id=group, trial_id=str(trial_id), msg="请先配置机器人 wxid")
+        finish("failed", "报告已生成，未执行警告：请先配置机器人 wxid")
         write(state_path, {**state, "status": "missing_robot_wxid"})
         return
     for item in (outcome or {}).get("warnings", []):
@@ -81,12 +97,14 @@ def dispatch(source, event, settings):
             person = {"id": user_id, "username": username or "", "group_nickname": nickname or ""}
             reason = "\n".join(f"违规原文：{row['text']}\n原因：{row['reason']}" for row in rows)
             results = state["members"].setdefault(user_id, {})
+            progress(f"正在发送 {nickname or username or user_id} 的违规依据")
             results["reason"] = send(f"{user_id}:reason", reason)
             if results["reason"] != "completed":
                 continue
             if not (nickname or username):
                 results["warning"] = "缺少可用于 @ 的昵称"
                 continue
+            progress(f"正在发送 {nickname or username or user_id} 的 @ 警告")
             results["warning"] = send(f"{user_id}:warning", "警告", [{
                 "group_nickname": nickname or username, "username": username or nickname,
                 "remark": contact.get("remark") or None,
@@ -102,8 +120,14 @@ def dispatch(source, event, settings):
                 "note": "", "warning_reason": reason,
             })
             results["recorded"] = True
+            progress(f"已记录 {nickname or username or user_id} 的警告")
         except Exception:
             log.exception("trial_penalty_failed", group_id=group, trial_id=str(trial_id))
         finally:
+            progress(f"成员处理状态 · {user_id} · {json.dumps(state['members'].get(user_id, {}), ensure_ascii=False)}")
             write(state_path, state)
     write(state_path, state)
+    failed = any(not member.get("recorded") for member in state["members"].values())
+    if outcome is not None and not outcome.get("complete"):
+        failed = True
+    finish("failed" if failed else "completed", "审判结束，部分步骤未完成" if failed else "审判完成")

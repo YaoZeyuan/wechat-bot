@@ -341,7 +341,7 @@ def resolve_target(target: Target) -> str:
         raise ValueError(f"无法确认「{name}」是唯一群名，请为目标群设置唯一备注后重试")
     return name
 
-def run(job, result):
+def run(job, result, *, continues=False):
     from sender import SendError
     from sender.accessibility import AccessibilitySender, ShareRejected
     from server.main import _devices, create_sender, sender_console_lock, sender_log
@@ -459,8 +459,8 @@ def run(job, result):
                     return
                 result["items"][index] = "checked" if job.mode == "dry_run" else "sent"
                 sending = False
-            result["status"] = "completed"
-            progress("任务完成")
+            result["status"] = "running" if continues else "completed"
+            progress("开场通知已发送，审判继续" if continues else "任务完成")
         except Exception as exc:
             result["status"] = "uncertain" if sending and not isinstance(exc, ShareRejected) else "failed"
             if index is not None:

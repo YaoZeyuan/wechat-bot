@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { api, type SenderAiLog, type SenderHistoryItem } from './api'
 
 const records = ref<SenderHistoryItem[]>([])
@@ -13,7 +13,7 @@ const error = ref('')
 const retryTarget = ref<SenderHistoryItem>()
 const retrying = ref(false)
 const sources: Record<string, string> = {
-  manual: '手动发送', fixed_reply: '测试', daily_activity: '活跃日榜',
+  chat_trial: '审判', manual: '手动发送', fixed_reply: '测试', daily_activity: '活跃日榜',
   total_activity: '活跃总榜', total_lurkers: '潜水总榜',
   activity_stats: '活跃统计',
   ai_chat: 'AI 问答', self_intro: '自我介绍', member_review: '群友评价', group_order: '秩序管理', chat_summary: '聊天梳理', retry: '重试发送',
@@ -89,6 +89,20 @@ async function retry() {
 }
 
 onMounted(() => void load(0))
+let progressTimer: number | undefined
+onMounted(() => {
+  progressTimer = window.setInterval(async () => {
+    const id = selected.value?.id
+    if (!id || selected.value?.source !== 'chat_trial' || detail.value?.status !== 'running') return
+    try {
+      const job = await api.senderJob(id)
+      if (selected.value?.id === id) detail.value = job
+    } catch (cause) {
+      if (selected.value?.id === id) error.value = (cause as Error).message
+    }
+  }, 2000)
+})
+onUnmounted(() => window.clearInterval(progressTimer))
 </script>
 
 <template>
@@ -109,7 +123,7 @@ onMounted(() => void load(0))
             :class="{ active: selected?.id === record.id }" @click="selectCard(record)">
             <div class="record-text">
               <strong>{{ record.target.name }}</strong>
-              <span>{{ sources[record.source] ?? record.source }} · {{ statuses[record.status] ?? record.status }}</span>
+              <span>{{ sources[record.source] ?? record.source }} · {{ statuses[record.id === selected?.id ? detail?.status ?? record.status : record.status] ?? record.status }}</span>
               <small v-if="record.created_ms">{{ dateFormat.format(record.created_ms) }}</small>
             </div>
             <a-button size="small" type="text" :aria-pressed="selected?.id === record.id"
@@ -129,7 +143,7 @@ onMounted(() => void load(0))
         </section>
         <a v-if="selected?.source === 'chat_summary' && detail?.steps.includes('PDF 已就绪，等待手机发送')"
           :href="api.senderHistoryPdf(selected.id)" target="_blank" rel="noopener">在新标签页打开 PDF</a>
-        <a-button v-if="selected && detail" :disabled="busy || retrying || ['queued', 'running'].includes(detail.status)"
+        <a-button v-if="selected && detail && selected.source !== 'chat_trial'" :disabled="busy || retrying || ['queued', 'running'].includes(detail.status)"
           @click="retryTarget = selected">重试任务</a-button>
         <p v-if="!selected">请先选择一条任务。</p>
         <section v-if="selected && ['ai_chat', 'chat_summary', 'member_review'].includes(selected.source)">
