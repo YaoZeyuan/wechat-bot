@@ -38,6 +38,16 @@ from .reply import SendTask
 router = APIRouter(prefix="/api/reader", tags=["desktop reader"])
 
 
+@router.get("/trial-preview")
+def trial_preview():
+    from fastapi.responses import FileResponse
+
+    path = Path(__file__).resolve().parents[1] / "local-data" / "chat-trial-preview" / "index.html"
+    if not path.is_file():
+        raise HTTPException(404, "请先生成本地审判预览")
+    return FileResponse(path, media_type="text/html", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/monitored-groups/{group_id}/plugins/ai_chat/routes")
 def get_ai_chat_routes(group_id: str):
     try:
