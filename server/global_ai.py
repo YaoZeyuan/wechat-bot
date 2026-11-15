@@ -27,6 +27,8 @@ class Settings(BaseModel):
 
 def load(path=PATH) -> Settings:
     if not path.exists():
+        if path == TRIAL_PATH:
+            return Settings(provider="compatible", thinking=None, timeout_seconds=300)
         return Settings()
     try:
         return Settings.model_validate_json(path.read_text(encoding="utf-8-sig"))
@@ -55,7 +57,9 @@ def summarize(transcript: str, request_id: str) -> str:
 
 
 def generate(prompt: str, request_id: str, *, summary=False, model_id=None, trial=False):
-    settings = load(TRIAL_PATH) if trial and TRIAL_PATH.exists() else load()
+    settings = load(TRIAL_PATH if trial else PATH)
+    if trial and not settings.api_key.get_secret_value().strip():
+        raise ChatError("请在插件管理 → 审判中配置聚合 API 的密钥")
     model = Model(id=(model_id or settings.model).strip(), thinking=settings.thinking)
     provider = Provider(base_url=settings.base_url, api_key=settings.api_key, models={},
                         timeout_seconds=settings.timeout_seconds)
