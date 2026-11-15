@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Card as ACard, Input as AInput, Textarea as ATextarea } from '@arco-design/web-vue'
+import { Card as ACard, Input as AInput, Switch as ASwitch, Textarea as ATextarea } from '@arco-design/web-vue'
 import { api, type GroupPlugin } from './api'
 
 const props = defineProps<{ plugin: GroupPlugin; groupId: string }>()

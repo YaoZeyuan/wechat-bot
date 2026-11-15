@@ -21,7 +21,7 @@ const filtered = computed(() => {
 const active = computed(() => plugins.value.find(plugin => plugin.id === route.query.plugin) ?? filtered.value[0])
 const saving = ref(false)
 const saved = ref(false)
-const draft = ref({ global_enabled: true, enabled: false, assistant_name: '', intro_reply: '', history_count: 300, max_chars: 300, trial_hours: 1, trial_limit: 300, trial_cooldown: 3, trial_prompt: '', trial_intro: '', trial_summary: '', trial_judges: '', trial_clerk: '', trial_auto_warn: false, trial_warning_hours: 24 })
+const draft = ref({ global_enabled: true, enabled: false, assistant_name: '', intro_reply: '', history_count: 300, max_chars: 300, trial_hours: 1, trial_limit: 300, trial_cooldown: 3, trial_prompt: '', trial_intro: '', trial_summary: '', trial_judges: '', trial_clerk: 'qwen3.7-flash', trial_auto_warn: false, trial_warning_hours: 24 })
 watch(active, plugin => {
   draft.value = {
     global_enabled: plugin?.global_enabled ?? true,

@@ -41,7 +41,7 @@ class Settings(BaseModel):
     assistant_name: str | None = Field(default=None, max_length=80)
     intro_reply: str | None = Field(default=None, max_length=2500)
 
-    @field_validator("trial_intro", "trial_prompt", "trial_summary")
+    @field_validator("trial_intro", "trial_prompt", "trial_summary", "trial_clerk")
     @classmethod
     def default_trial_prompt(cls, value, info):
         return value if value.strip() else cls.model_fields[info.field_name].default
