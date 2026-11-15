@@ -5,6 +5,11 @@ import { api, type SenderAiLog, type SenderHistoryItem } from './api'
 const records = ref<SenderHistoryItem[]>([])
 const selected = ref<SenderHistoryItem>()
 const detail = ref<Awaited<ReturnType<typeof api.senderJob>>>()
+const dependencies = {
+  target: '目标会话', assets: '任务附件', adb: 'ADB 手机连接', sender: 'Sender 初始化',
+  screen: '手机屏幕', talkback: 'TalkBack', bridge: 'Sender 无障碍通道', wechat: '微信控件',
+}
+const checkStates = { ready: '🟢 就绪', unknown: '⚪ 未确认', failed: '🔴 失败' }
 const aiLogs = ref<SenderAiLog[]>()
 const aiError = ref('')
 const offset = ref(0)
@@ -152,6 +157,18 @@ onUnmounted(() => window.clearInterval(progressTimer))
         <a-button v-if="selected && detail && (selected.source !== 'chat_trial' || (detail.trial_resumable && detail.status === 'failed'))" :disabled="busy || retrying || ['queued', 'running'].includes(detail.status)"
           @click="retryTarget = selected">{{ selected.source === 'chat_trial' ? '续跑审判' : '重试任务' }}</a-button>
         <p v-if="!selected">请先选择一条任务。</p>
+        <section v-if="selected && detail" class="preflight">
+          <h3>前置依赖</h3>
+          <p v-if="!detail.checks">此任务没有前置检查记录。</p>
+          <dl>
+            <div v-for="(label, name) in dependencies" :key="name">
+              <dt>{{ label }}</dt>
+              <dd>{{ checkStates[detail.checks?.[name]?.status ?? 'unknown'] }}
+                <small v-if="detail.checks?.[name]?.detail">{{ detail.checks[name]?.detail }}</small>
+              </dd>
+            </div>
+          </dl>
+        </section>
         <section v-if="selected && ['ai_chat', 'chat_summary', 'member_review', 'chat_trial'].includes(selected.source)">
           <h3>模型调用</h3>
           <p v-if="aiError">{{ aiError }}</p>
@@ -193,6 +210,10 @@ onUnmounted(() => window.clearInterval(progressTimer))
 </template>
 
 <style scoped>
+.preflight dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.preflight dl > div { padding: 8px 12px; border: 1px solid var(--color-border-2); border-radius: 8px; }
+.preflight dd { margin: 4px 0 0; }
+.preflight small { display: block; overflow-wrap: anywhere; }
 .records { list-style: none; padding: 0; }
 .record { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; border: 1px solid var(--color-border-2); border-radius: 8px; background: var(--color-bg-2); cursor: pointer; }
 .record.active { background: var(--color-fill-2); }

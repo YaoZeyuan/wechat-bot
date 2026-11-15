@@ -6,7 +6,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from time import time
+from time import sleep, time
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
@@ -384,6 +384,12 @@ def run(job, result, *, continues=False):
     key = str(job.request_id)
     serial = None
 
+    def check(name, status, detail=""):
+        result["checks"][name] = {"status": status, "detail": detail}
+        save(key, result)
+        sender_log.info("sender_preflight", request_id=key, dependency=name,
+                        status=status, detail=detail, msg="Sender 前置检查")
+
     def progress(message):
         result["steps"].append(message)
         if serial:
@@ -413,8 +419,12 @@ def run(job, result, *, continues=False):
         phone = None
         try:
             result["status"] = "running"
+            result["checks"] = {}
+            pending_check = "target"
             progress("检查任务附件和手机连接")
             target = resolve_target(job.target)
+            check("target", "ready")
+            pending_check = "assets"
             if job.target.kind == "group":
                 progress(f"电脑端已核对群 ID 和唯一显示名「{target}」")
             assets = {}
@@ -427,15 +437,28 @@ def run(job, result, *, continues=False):
                     metadata = files[0].with_name("filename.json")
                     filename = json.loads(metadata.read_text(encoding="utf-8")) if metadata.exists() else files[0].name
                     assets[item.asset_id] = (files[0], filename)
-            ready = [item for item in _devices() if item["state"] == "device"]
+            check("assets", "ready", "" if assets else "此任务无需附件")
+            pending_check = "adb"
+            for attempt in range(3):
+                ready = [item for item in _devices() if item["state"] == "device"]
+                if ready or attempt == 2:
+                    break
+                progress(f"ADB 尚无可用设备，正在重新探测（{attempt + 1}/2）")
+                sleep(0.5)
             if len(ready) != 1:
-                raise ValueError("请连接并授权一台手机")
+                raise ValueError(f"需要一台已授权的手机，ADB 当前检测到 {len(ready)} 台可用设备")
             serial = ready[0]["serial"]
+            check("adb", "ready")
+            pending_check = "sender"
             phone = create_sender(serial=serial, dry_run=job.mode == "dry_run")
             if assets and not hasattr(phone, "send_asset"):
                 raise ValueError("附件发送需要手机无障碍通道")
             phone.on_progress = progress
+            if isinstance(phone, AccessibilitySender):
+                phone.on_check = check
             phone.connect()
+            check("sender", "ready")
+            pending_check = None
 
             for index, item in enumerate(job.messages):
                 progress(f"处理第 {index + 1} 条消息")
@@ -497,6 +520,8 @@ def run(job, result, *, continues=False):
             result["status"] = "running" if continues else "completed"
             progress("开场通知已发送，审判继续" if continues else "任务完成")
         except Exception as exc:
+            if pending_check:
+                check(pending_check, "failed", str(exc))
             result["status"] = "uncertain" if sending and not isinstance(exc, ShareRejected) else "failed"
             if index is not None:
                 result["items"][index] = result["status"]

@@ -184,6 +184,7 @@ interface SenderJobResult {
   steps: string[]
   items: string[]
   screens?: number[]
+  checks?: Record<string, { status: 'ready' | 'unknown' | 'failed'; detail: string }>
 }
 
 export interface SenderHistoryItem {

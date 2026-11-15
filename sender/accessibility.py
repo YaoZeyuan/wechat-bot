@@ -5,6 +5,7 @@ import json
 import re
 import socket
 import time
+from contextlib import contextmanager
 
 from .base import SendError
 from .config import setup_adb
@@ -28,6 +29,21 @@ class AccessibilitySender:
         self.max_chars = int(cfg.get("max_chars", 1800))
         self.database = cfg.get("database", "bot.db")
         self.on_progress = None
+        self.on_check = None
+
+    @contextmanager
+    def check(self, name):
+        if self.on_check:
+            self.on_check(name, "unknown")
+        try:
+            yield
+        except Exception as exc:
+            if self.on_check:
+                self.on_check(name, "failed", str(exc))
+            raise
+        else:
+            if self.on_check:
+                self.on_check(name, "ready")
 
     def progress(self, message):
         if self.on_progress:
@@ -38,7 +54,8 @@ class AccessibilitySender:
 
         self.device = adb.device(self.serial)
         self.ensure_awake_and_talkback()
-        result = self.bridge_status()
+        with self.check("bridge"):
+            result = self.bridge_status()
         self.progress(f"已连接手机无障碍服务，前台微信可见节点 {result['nodes']} 个")
         if not result["nodes"] and "root_package" in result:
             package = result["root_package"] or "无根节点"
@@ -46,12 +63,28 @@ class AccessibilitySender:
 
     def ensure_awake_and_talkback(self):
         self.progress("检查手机屏幕和 TalkBack")
+        with self.check("screen"):
+            self.ensure_screen()
+        with self.check("talkback"):
+            self.ensure_talkback()
+
+    def ensure_screen(self):
         power = self.device.shell(["dumpsys", "power"], timeout=5)
         if not re.search(r"\bmWakefulness=Awake\b", power):
             self.progress("手机已息屏，正在通过 ADB 唤醒")
             self.device.shell(["input", "keyevent", "KEYCODE_WAKEUP"], timeout=5)
         self.device.shell(["wm", "dismiss-keyguard"], timeout=5)
+        for attempt in range(3):
+            power = self.device.shell(["dumpsys", "power"], timeout=5)
+            if re.search(r"\bmWakefulness=Awake\b", power):
+                return
+            if attempt < 2:
+                self.progress("屏幕尚未亮起，正在重试唤醒")
+                self.device.shell(["input", "keyevent", "KEYCODE_WAKEUP"], timeout=5)
+                time.sleep(0.5)
+        raise SendError("手机屏幕自动唤醒失败")
 
+    def ensure_talkback(self):
         key = "enabled_accessibility_services"
         talkback = "com.google.android.marvin.talkback/.TalkBackService"
         enabled = self.device.shell(["settings", "get", "secure", key], timeout=5).strip()
@@ -72,6 +105,10 @@ class AccessibilitySender:
 
     def prepare_device(self):
         self.ensure_awake_and_talkback()
+        with self.check("wechat"):
+            self.ensure_wechat()
+
+    def ensure_wechat(self):
         active = self.foreground()
         if not active or active.group(2) != "com.tencent.mm":
             self.progress("正在打开手机微信")
@@ -79,9 +116,12 @@ class AccessibilitySender:
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             active = self.foreground()
-            if active and active.group(2) == "com.tencent.mm" and self.bridge_status()["nodes"] > 0:
-                self.progress("手机已亮屏，TalkBack 正在运行，微信控件可读")
-                return
+            if active and active.group(2) == "com.tencent.mm":
+                with self.check("bridge"):
+                    nodes = self.bridge_status()["nodes"]
+                if nodes > 0:
+                    self.progress("手机已亮屏，TalkBack 正在运行，微信控件可读")
+                    return
             time.sleep(0.5)
         raise SendError("手机准备未完成，请检查锁屏或挡住微信的系统弹窗")
 
