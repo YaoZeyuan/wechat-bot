@@ -71,9 +71,6 @@ const tabs = [
       <nav aria-label="后台导航">
         <RouterLink v-for="item in tabs" :key="item.path" :to="item.path">{{ item.label }}</RouterLink>
       </nav>
-      <nav aria-label="本地报告">
-        <a href="/api/reader/trial-preview" target="_blank" rel="noopener">审判预览</a>
-      </nav>
     </aside>
     <a-layout class="admin-main">
       <a-layout-header class="admin-header">
