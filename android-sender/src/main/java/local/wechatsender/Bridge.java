@@ -199,13 +199,17 @@ public final class Bridge extends AccessibilityService {
         AccessibilityNodeInfo row = candidates.get(0);
         click(row);
         pause();
-        require(chatReady(target), "@成员选择后未返回目标群");
         String after = "";
+        boolean returned = false;
         for (int attempt = 0; attempt < 4; attempt++) {
-            after = value(unique(AccessibilityNodeInfo::isEditable, "聊天输入框").getText()).toString();
-            if (after.startsWith(before + "@") && after.length() > before.length() + 1) return;
+            if (chatReady(target)) {
+                returned = true;
+                after = value(unique(AccessibilityNodeInfo::isEditable, "聊天输入框").getText()).toString();
+                if (after.startsWith(before + "@") && after.length() > before.length() + 1) return;
+            }
             pause();
         }
+        require(returned, "@成员选择后未返回目标群；页面控件：" + pageShape(target));
         throw new IOException("@成员未写入输入框；匹配并点击了「" + nickname
             + "」，选择器已关闭，输入框末尾是否仍为裸 @：" + after.endsWith("@"));
     }
