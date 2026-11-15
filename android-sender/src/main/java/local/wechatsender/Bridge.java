@@ -60,7 +60,7 @@ public final class Bridge extends AccessibilityService {
                     JSONObject request = new JSONObject(line);
                     Bridge bridge = activeBridge;
                     if (bridge == null) throw new IOException("手机无障碍服务尚未连接");
-                    JSONObject response = bridge.execute(request, clicked);
+                    JSONObject response = bridge.execute(request, clicked, reader, writer);
                     writer.println(response.put("ok", true));
                 } catch (Exception error) {
                     writer.println(new JSONObject().put("ok", false).put("uncertain", clicked[0])
@@ -72,7 +72,7 @@ public final class Bridge extends AccessibilityService {
         }
     }
 
-    private JSONObject execute(JSONObject request, boolean[] clicked) throws Exception {
+    private JSONObject execute(JSONObject request, boolean[] clicked, BufferedReader reader, PrintWriter writer) throws Exception {
         String action = request.getString("action");
         if (action.equals("status")) {
             AccessibilityNodeInfo root = getRootInActiveWindow();
@@ -121,7 +121,7 @@ public final class Bridge extends AccessibilityService {
             require(mentions.length() > 0 && mentions.length() <= 10, "@成员数量无效");
             for (int i = 0; i < mentions.length(); i++) {
                 JSONObject member = mentions.getJSONObject(i);
-                addMention(target, member.getString("group_nickname"), member.getString("username"));
+                addMention(target, member.getString("group_nickname"), member.getString("username"), request.optBoolean("mention_progress"), reader, writer);
             }
             input = unique(AccessibilityNodeInfo::isEditable, "聊天输入框");
             String prefix = value(input.getText()).toString();
@@ -155,7 +155,7 @@ public final class Bridge extends AccessibilityService {
         pause();
     }
 
-    private void addMention(String target, String nickname, String username) throws Exception {
+    private void addMention(String target, String nickname, String username, boolean progress, BufferedReader reader, PrintWriter writer) throws Exception {
         require(chatReady(target), "@成员前会话标题未匹配");
         AccessibilityNodeInfo input = unique(AccessibilityNodeInfo::isEditable, "聊天输入框");
         String before = input.isShowingHintText() ? "" : value(input.getText()).toString();
@@ -172,9 +172,9 @@ public final class Bridge extends AccessibilityService {
             click(unique(named("搜索"), "@成员搜索入口"));
             pause();
         }
-        List<AccessibilityNodeInfo> candidates = mentionRows(nickname);
+        List<AccessibilityNodeInfo> candidates = mentionRows(nickname, "群昵称", progress, reader, writer);
         if (candidates.isEmpty() && !nickname.equals(username)) {
-            candidates = mentionRows(username);
+            candidates = mentionRows(username, "微信昵称", progress, reader, writer);
         }
         require(!candidates.isEmpty(), "未找到匹配的 @成员：" + nickname + " / " + username);
         AccessibilityNodeInfo row = candidates.get(0);
@@ -185,7 +185,7 @@ public final class Bridge extends AccessibilityService {
         require(after.startsWith(before + "@") && after.length() > before.length() + 1, "@成员未写入输入框");
     }
 
-    private List<AccessibilityNodeInfo> mentionRows(String name) throws Exception {
+    private List<AccessibilityNodeInfo> mentionRows(String name, String label, boolean progress, BufferedReader reader, PrintWriter writer) throws Exception {
         List<AccessibilityNodeInfo> fields = mentionSearchFields();
         AccessibilityNodeInfo search = fields.size() == 1 ? fields.get(0)
             : unique(AccessibilityNodeInfo::isEditable, "@成员搜索框");
@@ -194,6 +194,11 @@ public final class Bridge extends AccessibilityService {
         for (AccessibilityNodeInfo node : matching(n -> !n.isEditable() && named(name).test(n))) {
             AccessibilityNodeInfo row = clickable(node);
             if (row != null && !row.isEditable()) rows.add(row);
+        }
+        if (progress) {
+            writer.println(new JSONObject().put("progress", "@成员搜索：" + label + "「" + name
+                + "」，精确匹配 " + rows.size() + " 条"));
+            require("ack".equals(reader.readLine()), "@成员搜索截图确认超时");
         }
         return new ArrayList<>(rows);
     }

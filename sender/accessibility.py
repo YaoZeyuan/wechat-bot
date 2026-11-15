@@ -87,10 +87,17 @@ class AccessibilitySender:
             port = self.device.forward_port(endpoint)
             with socket.create_connection(("127.0.0.1", port), timeout=3) as peer:
                 peer.settimeout(25)
+                if action == "mention_text":
+                    payload["mention_progress"] = True
                 request = json.dumps({"action": action, **payload}, ensure_ascii=False)
                 peer.sendall(request.encode("utf-8") + b"\n")
                 with peer.makefile("rb") as response:
-                    result = json.loads(response.readline(16384))
+                    while True:
+                        result = json.loads(response.readline(16384))
+                        if "progress" not in result:
+                            break
+                        self.progress(result["progress"])
+                        peer.sendall(b"ack\n")
         except (OSError, ValueError) as exc:
             raise SendError("手机无障碍通道未响应，请检查手机端服务是否已启用") from exc
         if not result["ok"] and not result.get("uncertain"):
