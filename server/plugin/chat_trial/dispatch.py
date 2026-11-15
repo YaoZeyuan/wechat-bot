@@ -9,6 +9,7 @@ from uuid import NAMESPACE_URL, uuid5
 import structlog
 
 from ..group_order import record_trial_warning, write
+from . import format_elapsed
 from .__main__ import preview, read_group
 
 ROOT = Path(__file__).resolve().parents[3] / "local-data" / "chat-trial-runs"
@@ -88,7 +89,7 @@ def dispatch(source, event, settings, *, retry=False):
             return
         started = perf_counter()
         status = send("opening-notice", f"开始执行@{sender_name} 发起的审判")
-        progress(f"审判开场通知 · {status} · {ceil(perf_counter() - started)} 秒")
+        progress(f"审判开场通知 · {status} · {format_elapsed(perf_counter() - started)} 秒")
         if status != "completed":
             raise RuntimeError(f"开场通知未确认送达 · {status}")
         notice_sent = True
@@ -102,7 +103,7 @@ def dispatch(source, event, settings, *, retry=False):
         else:
             transcript, names, evidence = read_group(group, settings.trial_hours, settings.trial_limit, before=event)
             write(input_path, [transcript, names, evidence])
-        progress(f'群聊记录已就绪 · {ceil(perf_counter() - started)} 秒')
+        progress(f'群聊记录已就绪 · {format_elapsed(perf_counter() - started)} 秒')
         report = folder / f"{trial_id}.html"
         prior = report.with_suffix(".json")
         outcome = json.loads(prior.read_text(encoding="utf-8")) if retry and prior.exists() else None
@@ -124,7 +125,7 @@ def dispatch(source, event, settings, *, retry=False):
             delivery = send('report', asset_id=history_id)
             if delivery != 'completed':
                 raise RuntimeError(f'HTML 报告未确认送达，停止后续警告 · {delivery}')
-            progress(f"HTML 报告已发送到原群 · {ceil(perf_counter() - started)} 秒")
+            progress(f"HTML 报告已发送到原群 · {format_elapsed(perf_counter() - started)} 秒")
     except Exception as exc:
         finish("failed", f"审判失败 · {exc}")
         log.exception("trial_group_failed", group_id=group, trial_id=str(trial_id))
@@ -143,7 +144,7 @@ def dispatch(source, event, settings, *, retry=False):
     if warnings:
         started = perf_counter()
         notice = send("warning-start", "开始根据审判结果，发送警告")
-        progress(f"自动警告开始通知 · {notice} · {ceil(perf_counter() - started)} 秒")
+        progress(f"自动警告开始通知 · {notice} · {format_elapsed(perf_counter() - started)} 秒")
         if notice != "completed":
             finish("failed", "自动警告开始通知未确认，暂停警告")
             write(state_path, {**state, "status": "failed"})
@@ -163,7 +164,7 @@ def dispatch(source, event, settings, *, retry=False):
             progress(f"正在发送 {nickname or username or user_id} 的违规依据")
             started = perf_counter()
             results["reason"] = send(f"{user_id}:reason", reason)
-            progress(f"违规依据发送 · {results['reason']} · {ceil(perf_counter() - started)} 秒")
+            progress(f"违规依据发送 · {results['reason']} · {format_elapsed(perf_counter() - started)} 秒")
             if results["reason"] != "completed":
                 continue
             if not (nickname or username):
@@ -175,7 +176,7 @@ def dispatch(source, event, settings, *, retry=False):
                 "group_nickname": nickname or username, "username": username or nickname,
                 "remark": contact.get("remark") or None,
             }])
-            progress(f"@ 警告发送 · {results['warning']} · {ceil(perf_counter() - started)} 秒")
+            progress(f"@ 警告发送 · {results['warning']} · {format_elapsed(perf_counter() - started)} 秒")
             if results["warning"] != "completed":
                 continue
             now = time()

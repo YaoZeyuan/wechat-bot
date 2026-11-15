@@ -6,7 +6,6 @@ from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from html import escape
 from time import perf_counter, time
-from math import ceil
 from threading import Event
 from pathlib import Path
 from uuid import uuid4
@@ -16,6 +15,7 @@ from unittest.mock import patch
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 
+from . import format_elapsed
 from ...global_ai import ChatError, generate
 
 TRANSCRIPT = """M001 @U01：这份统计只覆盖一所学校，能代表整个城市吗？
@@ -120,9 +120,9 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
             result = generate(prompt, request_id, model_id=model, trial=True, on_request=on_request)
         except ChatError as exc:
             detail = " · ".join([str(exc), *getattr(exc, "__notes__", [])])
-            progress(f"{label} 失败 · {ceil(perf_counter() - started)} 秒 · {detail}")
+            progress(f"{label} 失败 · {format_elapsed(perf_counter() - started)} 秒 · {detail}")
             raise
-        progress(f"{label} 已返回 · {ceil(result[2])} 秒")
+        progress(f"{label} 已返回 · {format_elapsed(result[2])} 秒")
         if saved is not None:
             from ..group_order import write
 
@@ -191,7 +191,7 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
             penalty = f"<p>处罚提取失败 · {escape(reason)}</p>"
         penalty = "<section><h2>处罚依据</h2>" + penalty + "</section>"
     cards = "".join(
-        f"<details><summary>裁决 {i}<small>{escape(judge)} · {ceil(elapsed)} 秒</small></summary>"
+        f"<details><summary>裁决 {i}<small>{escape(judge)} · {format_elapsed(elapsed)} 秒</small></summary>"
         f"<article>{render(verdict, names)}</article></details>"
         for i, (verdict, judge, elapsed) in enumerate(results, 1)
     )
@@ -200,13 +200,13 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(Template(Path(__file__).with_name("template.html").read_text(encoding="utf-8")).substitute(
         original=escape(restore_names(original, names)), cards=cards, clerk=escape(clerk),
-        seconds=ceil(summary_elapsed), summary=render(summary, names), penalty=penalty,
+        seconds=format_elapsed(summary_elapsed), summary=render(summary, names), penalty=penalty,
     ), encoding="utf-8")
     if outcome is not None:
         output.with_suffix(".json").write_text(json.dumps(outcome, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
         output.with_suffix(".json").unlink(missing_ok=True)
-    progress(f'HTML 生成完成 · {ceil(perf_counter() - render_started)} 秒')
+    progress(f'HTML 生成完成 · {format_elapsed(perf_counter() - render_started)} 秒')
     return outcome
 
 

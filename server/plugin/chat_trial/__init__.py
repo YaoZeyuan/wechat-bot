@@ -1,3 +1,4 @@
+from decimal import Decimal, ROUND_CEILING
 from pathlib import Path
 
 DEFAULT_INTRO = Path(__file__).with_name("default_intro.txt").read_text(encoding="utf-8").strip()
@@ -21,3 +22,7 @@ METADATA = {
         {"key": "trial_prompt", "label": "审判规则", "type": "textarea", "max_length": 16000},
     ],
 }
+
+
+def format_elapsed(seconds: float) -> str:
+    return str(Decimal(str(seconds)).quantize(Decimal("0.01"), rounding=ROUND_CEILING))
