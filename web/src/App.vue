@@ -320,7 +320,7 @@ onUnmounted(() => {
           <button class="ghost" :disabled="busy" @click="refresh">刷新状态</button>
 
         </div>
-        <p v-else-if="deviceReady === false" class="hint">请连接并授权一台手机，再刷新状态。</p>
+        <p v-if="deviceReady === false" class="hint">请连接并授权一台手机，再刷新状态。</p>
         <h3 v-if="steps.length">发送过程</h3>
         <ol v-if="steps.length" aria-live="polite">
           <li v-for="(step, index) in steps" :key="index">{{ step }}</li>
