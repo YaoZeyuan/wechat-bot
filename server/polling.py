@@ -10,6 +10,8 @@ from .group_plugins import dispatch as dispatch_builtin
 log = structlog.get_logger("wechat_bot.polling")
 PAGE_SIZE = 50
 MAX_PAGES = 100
+MAX_CURSOR_MISSES = 10
+cursor_misses: dict[str, tuple[str, int]] = {}
 
 
 def message_id(row: dict) -> str:
@@ -55,6 +57,7 @@ def page(source, group_id: str, offset: int, limit: int) -> list[dict]:
 def poll_group(source, automation: Automation, group_id: str, source_id: str = "") -> int:
     cursor_key = f"{source_id}:{group_id}" if source_id else group_id
     checkpoint = automation.cursor(cursor_key)
+    previous_miss = cursor_misses.pop(cursor_key, None)
     if checkpoint is None:
         rows = page(source, group_id, 0, 1)
         automation.save_cursor(cursor_key, message_id(rows[0]) if rows else "")
@@ -73,7 +76,16 @@ def poll_group(source, automation: Automation, group_id: str, source_id: str = "
         if reached_boundary or len(rows) < PAGE_SIZE:
             break
     if not reached_boundary and (checkpoint or len(rows) == PAGE_SIZE):
-        raise SourceError("未找到上次读取位置，已保留游标以避免漏读或重复触发")
+        misses = previous_miss[1] + 1 if previous_miss and previous_miss[0] == checkpoint else 1
+        if misses >= MAX_CURSOR_MISSES:
+            latest = next(iter(newer), "")
+            automation.save_cursor(cursor_key, latest)
+            log.warning("desktop_group_cursor_reset", group_id=group_id, misses=misses,
+                        old_cursor=checkpoint, new_cursor=latest,
+                        msg="连续找不到上次读取位置，已重置游标，从下一轮开始读取新消息")
+            return 0
+        cursor_misses[cursor_key] = (checkpoint, misses)
+        raise SourceError(f"未找到上次读取位置（连续 {misses}/{MAX_CURSOR_MISSES} 次），已保留游标")
     if not newer:
         return 0
     events = [(incoming_text(group_id, row, f"{source_id}:{identity}" if source_id else identity), row)
