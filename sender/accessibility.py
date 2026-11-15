@@ -134,7 +134,7 @@ class AccessibilitySender:
             raise SendError(f"文字不能为空，且最多 {self.max_chars} 字")
         if not current_chat:
             self.prepare_chat(target)
-        self.progress("手机无障碍服务正在校验输入框和完整文本")
+        self.progress("手机无障碍服务正在填写消息")
         payload = {"mentions": mentions, "mention_position": mention_position} if mentions else {}
         result = self.call("mention_text" if mentions else "text", target=target, text=text, dry_run=self.dry_run, **payload)
         ok = result["ok"]
@@ -144,7 +144,7 @@ class AccessibilitySender:
                      result.get("error", "dry_run" if self.dry_run else "sent"), self.dry_run)
         finally:
             conn.close()
-        self.progress(result.get("error", "演练已清理输入框" if self.dry_run else "手机已核对发送后的完整文本"))
+        self.progress(result.get("error", "演练已清理输入框" if self.dry_run else "手机已点击发送并确认输入框清空"))
         return ok
 
     def send_asset(self, target, kind, path, filename, *, group=False):
