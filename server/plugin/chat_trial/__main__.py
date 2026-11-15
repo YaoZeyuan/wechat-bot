@@ -68,7 +68,7 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
     progress('正在生成 HTML')
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(Template(Path(__file__).with_name("template.html").read_text(encoding="utf-8")).substitute(
-        source_label='真实群聊' if real_group else '示例聊天', judge_label='独立模型裁决' if judges else '三份裁决复用同一次模型返回', original=escape(original), cards=cards, clerk=escape(clerk),
+        original=escape(original), cards=cards, clerk=escape(clerk),
         seconds=int(summary_elapsed), summary=render(summary, names),
     ), encoding="utf-8")
 

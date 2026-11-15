@@ -5,10 +5,9 @@
 :root{color-scheme:light;--ink:#232426;--muted:#575a60;--line:#d9dade;--paper:#fff}
 *{box-sizing:border-box}
 body{margin:0;background:#eeeff1;color:var(--ink);font:16px/1.75 "Microsoft YaHei UI","PingFang SC",system-ui,sans-serif}
-main{width:min(calc(100% - 32px),850px);margin:clamp(16px,5vw,64px) auto;background:var(--paper);border:1px solid var(--line);border-top:5px solid #292b2f;padding:clamp(18px,6vw,64px)}
+main{width:80vw;margin:clamp(16px,5vw,64px) auto;background:var(--paper);border:1px solid var(--line);border-top:5px solid #292b2f;padding:clamp(18px,6vw,64px)}
 header{padding:0 0 26px;margin-bottom:24px;border-bottom:3px double #a4a6ab}
 h1{font:700 clamp(30px,6vw,48px)/1.25 "Songti SC",SimSun,serif;letter-spacing:.07em;margin:0}
-header p{color:var(--muted);margin:12px 0 0;font-size:13px}
 h2{margin:0;font:700 25px/1.5 "Songti SC",SimSun,serif}
 small{color:var(--muted);font-size:13px;font-weight:400}
 details{border-bottom:1px solid var(--line)}
@@ -24,9 +23,10 @@ th{background:#eeeff1}
 pre{white-space:pre-wrap;font:inherit;background:#f3f3f4;padding:14px}
 button{border:1px solid #8e9197;border-radius:4px;background:white;color:var(--ink);padding:6px 12px;font:inherit;font-size:14px;cursor:pointer}
 :focus-visible{outline:2px solid #555960;outline-offset:3px}
+@media(max-width:760px){main{width:calc(100% - 24px)}}
 @media(max-width:480px){summary small{display:block;margin-left:18px}td,th{padding:7px}section{margin-top:24px}}
 </style>
-<main><header><h1>群聊审判</h1><p>本地预览 · $source_label · $judge_label</p></header>
+<main><header><h1>群聊审判</h1></header>
 
 <details><summary>审判原始内容</summary><article>
 <button type="button" id="copy">复制原始内容</button><pre id="original">$original</pre>
