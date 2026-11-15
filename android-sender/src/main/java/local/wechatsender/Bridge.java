@@ -128,8 +128,9 @@ public final class Bridge extends AccessibilityService {
             Bundle cursor = new Bundle();
             cursor.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, prefix.length());
             cursor.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, prefix.length());
-            require(input.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, cursor),
-                "无法将光标移到 @成员之后");
+            if (!input.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, cursor)) {
+                android.util.Log.i("WeChatSender", "微信未接受光标定位，使用选中 @成员后的光标");
+            }
             paste(input, text);
             text = prefix + text;
         } else {
