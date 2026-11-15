@@ -7,13 +7,10 @@ const props = defineProps<{ plugin: GroupPlugin; groupId: string }>()
 const emit = defineEmits<{ saved: [GroupPlugin] }>()
 const draft = ref({ ...props.plugin })
 const trial = computed(() => props.plugin.id === 'chat_trial')
-const tab = ref('before')
+const tab = ref('models')
 const tabs = [
-  { id: 'before', label: '审判前配置', fields: ['trial_hours', 'trial_limit', 'trial_cooldown', 'trial_intro'] },
-  { id: 'rules', label: '审判规则', fields: ['trial_prompt'] },
-  { id: 'summary', label: '汇总规则', fields: ['trial_summary'] },
-  { id: 'models', label: '模型配置', fields: ['trial_judges', 'trial_clerk'] },
-  { id: 'preview', label: '最终判词预览', fields: [] },
+  { id: 'models', label: '参数与模型', fields: ['trial_hours', 'trial_limit', 'trial_cooldown', 'trial_judges', 'trial_clerk'] },
+  { id: 'prompts', label: '提示词', fields: ['trial_intro', 'trial_prompt', 'trial_summary'] },
 ]
 const fields = computed(() => (props.plugin.fields ?? []).filter(field =>
   !trial.value || tabs.find(item => item.id === tab.value)?.fields.includes(field.key)))
@@ -28,7 +25,7 @@ async function showRequestPreview() {
   error.value = ''
   requestPreview.value = ''
   try {
-    requestPreview.value = JSON.stringify(await api.trialRequestPreview(props.groupId), null, 2)
+    requestPreview.value = (await api.trialRequestPreview(props.groupId)).text
   } catch (cause) {
     error.value = (cause as Error).message
   } finally {
@@ -76,16 +73,6 @@ function setJudge(index: number, value: string) {
         <a-tab-pane v-for="item in tabs" :key="item.id" :title="item.label" />
       </a-tabs>
       <p v-if="trial && tab === 'models'">接口地址和 API Key 在「插件管理 → 审判」统一配置。模型 ID 留空时使用默认模型。</p>
-      <div v-if="trial && tab === 'preview'">
-        <a-button :disabled="dirty" :loading="loadingPreview" @click="showRequestPreview">查看模型请求</a-button>
-        <p>使用已保存配置与固定示例聊天。书记官正文会在法官返回后拼接。</p>
-        <pre v-if="requestPreview" class="request-preview">{{ requestPreview }}</pre>
-      </div>
-      <p v-if="trial && tab === 'preview'">
-        <a href="/api/reader/trial-preview" target="_blank" rel="noopener">打开最近生成的审判报告</a>
-        <br />保存后运行下方命令，使用本群消息重新生成报告。
-        <br /><code>uv run python -m server.plugin.chat_trial --group '{{ groupId }}'</code>
-      </p>
       <div v-if="trial && tab === 'models'" class="judge-slots">
           <label v-for="slot in 3" :key="slot">
             法官{{ slot }}号
@@ -103,6 +90,11 @@ function setJudge(index: number, value: string) {
         <a-input v-else :id="`plugin-${field.key}`" :model-value="draft[field.key] ?? ''"
           :placeholder="field.placeholder" :max-length="field.max_length" :disabled="busy"
           @update:model-value="draft[field.key] = $event" />
+      </div>
+      <div v-if="trial && tab === 'prompts'">
+        <a-button :disabled="dirty" :loading="loadingPreview" @click="showRequestPreview">预览审判词</a-button>
+        <p v-if="dirty">保存配置后可预览。预览使用固定示例聊天。</p>
+        <pre v-if="requestPreview && !dirty" class="request-preview">{{ requestPreview }}</pre>
       </div>
       <a-alert v-if="error" type="error">{{ error }}</a-alert>
       <div class="actions">

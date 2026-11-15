@@ -104,20 +104,10 @@ def preview_chat_summary(request: SummaryPreview):
 
 @router.get("/trial-request-preview")
 def trial_request_preview(group_id: str):
-    from .plugin.ai_chat import Model, completion_payload
     from .plugin.chat_trial.__main__ import TRANSCRIPT, judge_prompt
 
     settings = builtin_plugins.config(group_id, "chat_trial", automation.group_plugins(group_id))
-    connection = global_ai.load(global_ai.TRIAL_PATH)
-    prompt = judge_prompt(TRANSCRIPT, settings.trial_intro, settings.trial_prompt)
-    judges = settings.trial_judges.splitlines() or [connection.model]
-    return {
-        "url": str(connection.base_url).rstrip("/") + "/chat/completions",
-        "requests": [completion_payload(connection.provider, Model(id=name, thinking=connection.thinking),
-                                        prompt, "") for name in judges],
-        "summary_rules": settings.trial_summary,
-        "clerk_model": settings.trial_clerk or connection.model,
-    }
+    return {"text": judge_prompt(TRANSCRIPT, settings.trial_intro, settings.trial_prompt)}
 
 
 @router.get("/trial-ai")
