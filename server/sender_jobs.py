@@ -360,8 +360,13 @@ def run(job, result):
                     folder.mkdir(parents=True, exist_ok=True)
                     (folder / f"{step}.png").write_bytes(image)
                     result.setdefault("screens", []).append(step)
+                else:
+                    raise ValueError("ADB 未返回有效 PNG")
             except Exception as exc:
-                sender_log.warning("sender_step_screen_failed", request_id=key, error=type(exc).__name__)
+                step = len(result["steps"])
+                result["steps"][-1] += f"（第 {step} 步截图保存失败：{exc or type(exc).__name__}）"
+                sender_log.warning("sender_step_screen_failed", request_id=key, step=step,
+                                   error=str(exc), error_type=type(exc).__name__)
         save(key, result)
         sender_log.info("sender_job_step", request_id=key, msg=message)
 

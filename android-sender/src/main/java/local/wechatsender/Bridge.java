@@ -161,7 +161,10 @@ public final class Bridge extends AccessibilityService {
         String before = input.isShowingHintText() ? "" : value(input.getText()).toString();
         click(input);
         paste(input, "@");
-        require(!matching(named("选择提醒的人")).isEmpty(), "微信未打开 @成员选择器");
+        if (matching(named("选择提醒的人")).isEmpty()) {
+            throw new IOException("微信未打开 @成员选择器；目标成员：" + nickname
+                + "；微信可见节点数：" + nodes().size() + "；页面控件：" + pageShape(target));
+        }
         List<AccessibilityNodeInfo> search = matching(AccessibilityNodeInfo::isEditable);
         if (search.isEmpty()) {
             click(unique(named("搜索"), "@成员搜索入口"));
@@ -331,7 +334,12 @@ public final class Bridge extends AccessibilityService {
     private int returnToHome() throws Exception {
         int attempts = 0;
         while (attempts < 5 && !home()) {
-            require(!nodes().isEmpty(), "无障碍未读到前台微信控件");
+            if (nodes().isEmpty()) {
+                AccessibilityNodeInfo root = getRootInActiveWindow();
+                throw new IOException("无障碍未读到前台微信控件；根节点应用："
+                    + (root == null ? "无" : value(root.getPackageName()))
+                    + "；可见窗口数：" + getWindows().size());
+            }
             require(performGlobalAction(GLOBAL_ACTION_BACK), "无法返回聊天首页");
             attempts++;
         pause();
