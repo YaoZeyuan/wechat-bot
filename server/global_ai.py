@@ -60,7 +60,7 @@ def summarize(transcript: str, request_id: str) -> str:
     return generate(transcript, request_id, summary=True)[0]
 
 
-def generate(prompt: str, request_id: str, *, summary=False, model_id=None, trial=False):
+def generate(prompt: str, request_id: str, *, summary=False, model_id=None, trial=False, on_request=None):
     settings = load(TRIAL_PATH if trial else PATH)
     if trial and not settings.api_key.get_secret_value().strip():
         raise ChatError("请在插件管理 → 审判中配置聚合 API 的密钥")
@@ -68,5 +68,5 @@ def generate(prompt: str, request_id: str, *, summary=False, model_id=None, tria
     provider = Provider(base_url=settings.base_url, api_key=settings.api_key, models={},
                         timeout_seconds=settings.timeout_seconds)
     answer, elapsed = complete(provider, model, settings.provider, prompt, settings.summary_prompt if summary else "",
-                           request_id=request_id)
+                           request_id=request_id, on_request=on_request)
     return answer, model.id, elapsed

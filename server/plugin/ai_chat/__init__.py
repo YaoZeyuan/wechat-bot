@@ -192,7 +192,7 @@ def completion_payload(provider_id, model, prompt, system_prompt):
 
 
 def complete(provider: Provider, model: Model, provider_id: str, prompt: str, system_prompt: str,
-             *, request_id: str | None = None, log_bodies: bool = True) -> tuple[str, float]:
+             *, request_id: str | None = None, log_bodies: bool = True, on_request=None) -> tuple[str, float]:
     key = provider.api_key.get_secret_value().strip()
     if not key or not model.id.strip():
         raise ChatError("请先在本地配置 API Key 和模型 ID")
@@ -218,6 +218,8 @@ def complete(provider: Provider, model: Model, provider_id: str, prompt: str, sy
                  request_bytes=len(request.data), request_body=body if log_bodies else None,
                  curl=curl if log_bodies else None)
     started = perf_counter()
+    if on_request is not None:
+        on_request()
     try:
         with build_opener(NoRedirect()).open(request, timeout=provider.timeout_seconds) as response:
             data = response.read(256 * 1024 + 1)

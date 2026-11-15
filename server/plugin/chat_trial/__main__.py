@@ -5,7 +5,9 @@ import re
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from html import escape
-from time import time
+from time import perf_counter, time
+from math import ceil
+from threading import Event
 from pathlib import Path
 from uuid import uuid4
 from string import Template
@@ -93,14 +95,14 @@ def judge_prompt(transcript, intro, rules):
     return f"【群规】\n{intro}\n{rules}\n\n请用可读判词说明结论，并引用对应成员和消息编号。\n\n【原始发言】\n{transcript}"
 
 
-def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id='', evidence=None, auto_warn=False, request_prefix='', cache_dir=None, progress=lambda message: None):
+def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id='', evidence=None, auto_warn=False, request_prefix='', cache_dir=None, on_judges_started=None, progress=lambda message: None):
     if evidence is None:
         evidence = {
             message_id: {"user_id": user_id, "text": text}
             for message_id, user_id, text in re.findall(r"^(M[0-9]+) @(U[0-9]+)：(.*)$", TRANSCRIPT, re.M)
         }
     original = judge_prompt(transcript, intro, rules)
-    def call(role, prompt, model=None):
+    def call(role, prompt, model=None, *, on_request=None):
         from hashlib import sha256
 
         saved = None
@@ -113,13 +115,14 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
         request_id = f"{request_prefix}:{uuid4()}" if request_prefix else str(uuid4())
         label = f"{role} · {model or '默认模型'}（请求 {request_id}）"
         progress(f"{label} 正在调用")
+        started = perf_counter()
         try:
-            result = generate(prompt, request_id, model_id=model, trial=True)
+            result = generate(prompt, request_id, model_id=model, trial=True, on_request=on_request)
         except ChatError as exc:
             detail = " · ".join([str(exc), *getattr(exc, "__notes__", [])])
-            progress(f"{label} 失败 · {detail}")
+            progress(f"{label} 失败 · {ceil(perf_counter() - started)} 秒 · {detail}")
             raise
-        progress(f"{label} 已返回 · {result[2]:.2f} 秒")
+        progress(f"{label} 已返回 · {ceil(result[2])} 秒")
         if saved is not None:
             from ..group_order import write
 
@@ -128,11 +131,24 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
 
     if len(judges) > 3:
         raise ValueError("法官模型最多配置三个")
-    if judges:
-        with ThreadPoolExecutor(max_workers=len(judges)) as executor:
-            results = list(executor.map(lambda model: call('法官', original, model), judges))
+    models = judges or (None,)
+    if judges or on_judges_started:
+        launched = Event()
+        def judge(model):
+            return call("法官", original, model, on_request=launched.set)
+
+        with ThreadPoolExecutor(max_workers=len(models)) as executor:
+            futures = [executor.submit(judge, model) for model in models]
+            if on_judges_started:
+                while not launched.wait(0.05) and not all(future.done() for future in futures):
+                    pass
+                if launched.is_set():
+                    on_judges_started()
+            results = [future.result() for future in futures]
     else:
-        results = [call('法官', original)] * 3
+        results = [call("法官", original)]
+    if not judges:
+        results *= 3
     verdicts = [result[0] for result in results]
     judge_text = "\n\n".join(f"法官 {i}\n{text}" for i, text in enumerate(verdicts, 1))
     summary, clerk, summary_elapsed = call(
@@ -175,20 +191,22 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
             penalty = f"<p>处罚提取失败 · {escape(reason)}</p>"
         penalty = "<section><h2>处罚依据</h2>" + penalty + "</section>"
     cards = "".join(
-        f"<details><summary>裁决 {i}<small>{escape(judge)} · {int(elapsed)} 秒</small></summary>"
+        f"<details><summary>裁决 {i}<small>{escape(judge)} · {ceil(elapsed)} 秒</small></summary>"
         f"<article>{render(verdict, names)}</article></details>"
         for i, (verdict, judge, elapsed) in enumerate(results, 1)
     )
     progress('正在生成 HTML')
+    render_started = perf_counter()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(Template(Path(__file__).with_name("template.html").read_text(encoding="utf-8")).substitute(
         original=escape(restore_names(original, names)), cards=cards, clerk=escape(clerk),
-        seconds=int(summary_elapsed), summary=render(summary, names), penalty=penalty,
+        seconds=ceil(summary_elapsed), summary=render(summary, names), penalty=penalty,
     ), encoding="utf-8")
     if outcome is not None:
         output.with_suffix(".json").write_text(json.dumps(outcome, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
         output.with_suffix(".json").unlink(missing_ok=True)
+    progress(f'HTML 生成完成 · {ceil(perf_counter() - render_started)} 秒')
     return outcome
 
 

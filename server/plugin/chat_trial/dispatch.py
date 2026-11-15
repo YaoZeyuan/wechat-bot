@@ -2,7 +2,8 @@
 import json
 from threading import Lock
 from pathlib import Path
-from time import time
+from time import perf_counter, time
+from math import ceil
 from uuid import NAMESPACE_URL, uuid5
 
 import structlog
@@ -37,28 +38,31 @@ def dispatch(source, event, settings, *, retry=False):
     history_id = uuid5(trial_id, "start")
     resume_path = folder / f"{history_id}.resume.json"
 
-    def send(key, text='', mentions=None, *, asset_id=None):
+    def send(key, text='', mentions=None, *, asset_id=None, reserve=False):
         job_id = uuid5(trial_id, key)
         job = Job(version=1, request_id=job_id, mode="send", target={"kind": "group", "id": group, "name": name},
                   trigger_text=event.text, messages=[{"type": "file", "asset_id": asset_id}] if asset_id else
                   [{"type": "text", "text": text, "mentions": mentions or []}])
         result, inserted = queue_job(job, strict=False, source="chat_trial")
+        if reserve:
+            if inserted:
+                result["status"] = "running"
+                save(str(job_id), result)
+            return result["status"]
         if retry and not inserted and result["status"] == "failed" and not result.get("text_sends"):
             result.update(status="queued", items=["pending"])
             save(str(job_id), result)
             inserted = True
         if inserted:
-            run(job, result, continues=key == 'start')
+            run(job, result)
         return get_job(job_id)["status"]
 
     wait = settings.trial_cooldown * 60 - (time() - last.get("time", 0))
     if wait > 0 and not retry:
-        from math import ceil
-
         send("cooldown", f"距离上轮{last['sender']} 发起的审判间隔不足{settings.trial_cooldown}分钟，请等待{ceil(wait / 60)}分钟后再进行")
         return
     if not retry:
-        if send("start", f"开始执行@{sender_name} 发起的审判") != "running":
+        if send("start", f"开始执行@{sender_name} 发起的审判", reserve=True) != "running":
             return
         write(last_path, {"time": time(), "sender": sender_name})
         write(resume_path, {"event": event.model_dump(mode="json"), "settings": settings.model_dump(mode="json")})
@@ -76,7 +80,21 @@ def dispatch(source, event, settings, *, retry=False):
         history["status"] = status
         progress(message)
 
+    notice_sent = any(step.startswith(("审判开场通知 · completed", "开场通知已发送")) for step in history["steps"])
+
+    def announce():
+        nonlocal notice_sent
+        if notice_sent:
+            return
+        started = perf_counter()
+        status = send("opening-notice", f"开始执行@{sender_name} 发起的审判")
+        progress(f"审判开场通知 · {status} · {ceil(perf_counter() - started)} 秒")
+        if status != "completed":
+            raise RuntimeError(f"开场通知未确认送达 · {status}")
+        notice_sent = True
+
     try:
+        started = perf_counter()
         progress('正在读取审判范围内的群聊记录')
         input_path = folder / f"{trial_id}.input.json"
         if input_path.exists():
@@ -84,6 +102,7 @@ def dispatch(source, event, settings, *, retry=False):
         else:
             transcript, names, evidence = read_group(group, settings.trial_hours, settings.trial_limit, before=event)
             write(input_path, [transcript, names, evidence])
+        progress(f'群聊记录已就绪 · {ceil(perf_counter() - started)} 秒')
         report = folder / f"{trial_id}.html"
         prior = report.with_suffix(".json")
         outcome = json.loads(prior.read_text(encoding="utf-8")) if retry and prior.exists() else None
@@ -92,16 +111,20 @@ def dispatch(source, event, settings, *, retry=False):
                               rules=settings.trial_prompt, intro=settings.trial_intro, summary_rules=settings.trial_summary,
                               judges=settings.trial_judges.splitlines(), clerk_id=settings.trial_clerk,
                               auto_warn=settings.trial_auto_warn, request_prefix=str(history_id),
-                              cache_dir=folder / str(trial_id), progress=progress)
-        if retry and "HTML 报告已发送到原群" in history["steps"]:
+                              cache_dir=folder / str(trial_id), on_judges_started=announce,
+                              progress=progress)
+        if not notice_sent:
+            announce()
+        if retry and any(step.startswith("HTML 报告已发送到原群") for step in history["steps"]):
             progress("已复用此前送达的 HTML 报告")
         else:
             stage_local_report(history_id, report, '群聊审判.html', '.html')
             progress('HTML 报告已生成，正在发送到原群')
+            started = perf_counter()
             delivery = send('report', asset_id=history_id)
             if delivery != 'completed':
                 raise RuntimeError(f'HTML 报告未确认送达，停止后续警告 · {delivery}')
-            progress("HTML 报告已发送到原群")
+            progress(f"HTML 报告已发送到原群 · {ceil(perf_counter() - started)} 秒")
     except Exception as exc:
         finish("failed", f"审判失败 · {exc}")
         log.exception("trial_group_failed", group_id=group, trial_id=str(trial_id))
@@ -117,10 +140,14 @@ def dispatch(source, event, settings, *, retry=False):
         write(state_path, {**state, "status": "missing_robot_wxid"})
         return
     warnings = (outcome or {}).get("warnings", [])
-    if warnings and send("warning-start", "开始根据审判结果，发送警告") != "completed":
-        finish("failed", "自动警告开始通知未确认，暂停警告")
-        write(state_path, {**state, "status": "failed"})
-        return
+    if warnings:
+        started = perf_counter()
+        notice = send("warning-start", "开始根据审判结果，发送警告")
+        progress(f"自动警告开始通知 · {notice} · {ceil(perf_counter() - started)} 秒")
+        if notice != "completed":
+            finish("failed", "自动警告开始通知未确认，暂停警告")
+            write(state_path, {**state, "status": "failed"})
+            return
     for item in warnings:
         try:
             rows = item["violations"]
@@ -134,17 +161,21 @@ def dispatch(source, event, settings, *, retry=False):
             reason = "\n".join(f"违规原文：{row['text']}\n原因：{row['reason']}" for row in rows)
             results = state["members"].setdefault(user_id, {})
             progress(f"正在发送 {nickname or username or user_id} 的违规依据")
+            started = perf_counter()
             results["reason"] = send(f"{user_id}:reason", reason)
+            progress(f"违规依据发送 · {results['reason']} · {ceil(perf_counter() - started)} 秒")
             if results["reason"] != "completed":
                 continue
             if not (nickname or username):
                 results["warning"] = "缺少可用于 @ 的昵称"
                 continue
             progress(f"正在发送 {nickname or username or user_id} 的 @ 警告")
+            started = perf_counter()
             results["warning"] = send(f"{user_id}:warning", "警告", [{
                 "group_nickname": nickname or username, "username": username or nickname,
                 "remark": contact.get("remark") or None,
             }])
+            progress(f"@ 警告发送 · {results['warning']} · {ceil(perf_counter() - started)} 秒")
             if results["warning"] != "completed":
                 continue
             now = time()
