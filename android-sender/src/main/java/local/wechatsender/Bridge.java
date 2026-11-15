@@ -200,8 +200,14 @@ public final class Bridge extends AccessibilityService {
         click(row);
         pause();
         require(chatReady(target), "@成员选择后未返回目标群");
-        String after = value(unique(AccessibilityNodeInfo::isEditable, "聊天输入框").getText()).toString();
-        require(after.startsWith(before + "@") && after.length() > before.length() + 1, "@成员未写入输入框");
+        String after = "";
+        for (int attempt = 0; attempt < 4; attempt++) {
+            after = value(unique(AccessibilityNodeInfo::isEditable, "聊天输入框").getText()).toString();
+            if (after.startsWith(before + "@") && after.length() > before.length() + 1) return;
+            pause();
+        }
+        throw new IOException("@成员未写入输入框；匹配并点击了「" + nickname
+            + "」，选择器已关闭，输入框末尾是否仍为裸 @：" + after.endsWith("@"));
     }
 
     private List<AccessibilityNodeInfo> mentionRows(String name, String label, Set<String> names, boolean progress, BufferedReader reader, PrintWriter writer) throws Exception {
