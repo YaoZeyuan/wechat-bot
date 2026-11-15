@@ -212,6 +212,8 @@ export const api = {
   trialAi: () => request<GlobalAiSettings & { api_key: string }>('/reader/trial-ai'),
   saveTrialAi: (settings: Omit<GlobalAiSettings, 'has_api_key'> & { api_key: string }) =>
     request<GlobalAiSettings & { api_key: string }>('/reader/trial-ai', { method: 'PUT', body: JSON.stringify(settings) }),
+  robotContacts: (q: string) => request<{ id: string; nickname: string; remark: string }[]>(
+    `/reader/robot-contacts?${new URLSearchParams({ q })}`),
   robotAccount: () => request<{ wxid: string }>('/reader/robot-account'),
   saveRobotAccount: (wxid: string) => request<{ wxid: string }>('/reader/robot-account', {
     method: 'PUT', body: JSON.stringify({ wxid }),

@@ -193,6 +193,26 @@ class RobotSettings(BaseModel):
     wxid: str = Field(default="", max_length=256)
 
 
+@router.get("/robot-contacts")
+def search_robot_contacts(q: str = Query("", max_length=256)):
+    try:
+        source = history_source()
+        with source.open(source.root / "contact" / "contact.db") as db:
+            rows = db.execute("""
+                SELECT username, nick_name, remark FROM contact
+                WHERE username <> '' AND username NOT LIKE '%@chatroom'
+                  AND substr(username, 1, 3) <> 'gh_'
+                  AND (instr(lower(username), lower(?)) OR instr(lower(nick_name), lower(?))
+                       OR instr(lower(remark), lower(?)))
+                ORDER BY username = ? DESC, coalesce(nullif(remark, ''), nick_name), username
+                LIMIT 50
+            """, (q, q, q, q)).fetchall()
+        return [{"id": row["username"], "nickname": row["nick_name"] or "", "remark": row["remark"] or ""}
+                for row in rows]
+    except SourceError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
 @router.get("/robot-account")
 def get_robot_account():
     return {"wxid": builtin_plugins.robot_wxid()}
@@ -207,7 +227,7 @@ def set_robot_account(settings: RobotSettings):
 @router.get("/global-ai")
 def get_global_ai():
     try:
-        return global_ai.public_settings()
+        return global_ai.public_settings(include_api_key=True)
     except global_ai.ChatError as exc:
         raise HTTPException(502, str(exc)) from None
 
@@ -218,7 +238,7 @@ def set_global_ai(settings: global_ai.Settings):
         raise HTTPException(422, "模型 API 地址应为 HTTPS Base URL")
     try:
         global_ai.save(settings)
-        return global_ai.public_settings()
+        return global_ai.public_settings(include_api_key=True)
     except (OSError, global_ai.ChatError) as exc:
         log.warning("global_ai_save_failed", msg="全局 AI 配置保存失败", error_type=type(exc).__name__)
         raise HTTPException(502, "无法保存全局 AI 配置") from None

@@ -21,7 +21,7 @@ class Settings(BaseModel):
     api_key: SecretStr = SecretStr("")
     model: str = Field(default="", max_length=256)
     thinking: Literal["disabled", "enabled"] | None = "disabled"
-    timeout_seconds: float = Field(default=120, gt=0, le=600)
+    timeout_seconds: float = Field(default=600, gt=0, le=600)
     summary_prompt: str = Field(default=DEFAULT_PROMPT, min_length=1, max_length=16000)
 
 

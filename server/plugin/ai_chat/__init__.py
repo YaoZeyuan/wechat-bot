@@ -40,7 +40,7 @@ class Provider(BaseModel):
     base_url: HttpUrl
     api_key: SecretStr
     models: dict[str, str | Model]
-    timeout_seconds: float = Field(default=20, gt=0, le=600)
+    timeout_seconds: float = Field(default=600, gt=0, le=600)
 
 
 class ModelRoute(BaseModel):
