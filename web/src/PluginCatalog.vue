@@ -142,7 +142,7 @@ function setJudge(index: number, value: string) {
         </div>
         <label v-for="field in active.fields?.filter(item => item.key !== 'trial_judges' && item.key !== 'trial_clerk')" :key="field.key" class="parameter">
               {{ field.label }}
-              <a-switch v-if="field.key === 'trial_auto_warn'" v-model="draft.trial_auto_warn" />
+              <a-switch class="trial-warning-switch" v-if="field.key === 'trial_auto_warn'" v-model="draft.trial_auto_warn" />
           <input v-else-if="field.key === 'history_count' || field.key === 'max_chars' || field.key === 'trial_hours' || field.key === 'trial_limit' || field.key === 'trial_cooldown' || field.key === 'trial_warning_hours'"
                 v-model.number="draft[field.key]" type="number" min="1" :max="field.max" required :disabled="saving" />
               <a-textarea v-else-if="field.type === 'textarea'" v-model="draft[field.key]" :max-length="field.max_length" :disabled="saving" />
@@ -160,6 +160,7 @@ function setJudge(index: number, value: string) {
 </template>
 
 <style scoped>
+.trial-warning-switch { justify-self: start; width: fit-content; }
 .judge-slots { display: grid; gap: 12px; margin: 12px 0; }
 .judge-slots label { display: grid; gap: 6px; }
 .plugin-page { max-width: 1260px; }

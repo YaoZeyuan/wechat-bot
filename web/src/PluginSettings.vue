@@ -113,7 +113,7 @@ function setJudge(index: number, value: string) {
         </div>
         <div v-for="field in fields?.filter(item => item.key !== 'trial_judges' && item.key !== 'trial_clerk')" :key="field.key" class="settings-row field">
         <label :for="`plugin-${field.key}`">{{ field.label }}<small v-if="field.description">{{ field.description }}</small></label>
-        <a-switch v-if="field.key === 'trial_auto_warn'" v-model="draft.trial_auto_warn" />
+        <a-switch class="trial-warning-switch" v-if="field.key === 'trial_auto_warn'" v-model="draft.trial_auto_warn" />
           <input v-else-if="field.key === 'history_count' || field.key === 'max_chars' || field.key === 'trial_hours' || field.key === 'trial_limit' || field.key === 'trial_cooldown' || field.key === 'trial_warning_hours'"
           :id="`plugin-${field.key}`" v-model.number="draft[field.key]" type="number" min="1" :max="field.max" required :disabled="busy" />
         <a-textarea v-else-if="field.type === 'textarea'" :id="`plugin-${field.key}`" :model-value="draft[field.key] ?? ''"
@@ -144,6 +144,7 @@ function setJudge(index: number, value: string) {
 </template>
 
 <style scoped>
+.trial-warning-switch { justify-self: start; width: fit-content; }
 .request-preview { max-height: 38vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; background: white; }
 .judge-slots { display: grid; gap: 12px; margin: 12px 0; }
 .judge-slots label { display: grid; gap: 6px; }
