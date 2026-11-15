@@ -84,6 +84,11 @@ sender_steps: list[str] = []
 
 @app.middleware("http")
 async def log_api_request(request: Request, call_next):
+    if request.method == "GET" and request.url.path == "/api/reader/trial-preview/status":
+        response = await call_next(request)
+        if response.status_code >= 400:
+            request_log.warning("trial_status_failed", status=response.status_code)
+        return response
     started = perf_counter()
     request_id = uuid4().hex
     status = 500

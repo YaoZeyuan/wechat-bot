@@ -133,8 +133,12 @@ function setJudge(index: number, value: string) {
             <a-input :model-value="draft.trial_judges?.split('\n')[slot - 1] ?? ''"
               :max-length="256" @update:model-value="value => setJudge(slot - 1, value)" />
           </label>
+          <label>
+            书记官模型 ID
+            <a-input v-model="draft.trial_clerk" :max-length="256" />
+          </label>
         </div>
-        <label v-for="field in active.fields?.filter(item => item.key !== 'trial_judges')" :key="field.key" class="parameter">
+        <label v-for="field in active.fields?.filter(item => item.key !== 'trial_judges' && item.key !== 'trial_clerk')" :key="field.key" class="parameter">
               {{ field.label }}
               <input v-if="field.key === 'history_count' || field.key === 'max_chars' || field.key === 'trial_hours' || field.key === 'trial_limit' || field.key === 'trial_cooldown'"
                 v-model.number="draft[field.key]" type="number" min="1" :max="field.max" required :disabled="saving" />
