@@ -136,8 +136,8 @@ def run_trial_preview(group_id, run):
         settings = builtin_plugins.config(group_id, "chat_trial", automation.group_plugins(group_id))
         output = Path(__file__).resolve().parents[1] / "local-data" / "chat-trial-preview" / f"{run['id']}.html"
         progress(f"读取本群最近 {settings.trial_hours} 小时内最多 {settings.trial_limit} 条消息")
-        transcript, names = read_group(group_id, settings.trial_hours, settings.trial_limit)
-        preview(output, transcript, names, real_group=True, intro=settings.trial_intro, rules=settings.trial_prompt,
+        transcript, names, evidence = read_group(group_id, settings.trial_hours, settings.trial_limit)
+        preview(output, transcript, names, real_group=True, evidence=evidence, intro=settings.trial_intro, rules=settings.trial_prompt,
                 summary_rules=settings.trial_summary, judges=settings.trial_judges.splitlines(),
                 clerk_id=settings.trial_clerk, progress=progress)
         progress("HTML 报告已生成")
