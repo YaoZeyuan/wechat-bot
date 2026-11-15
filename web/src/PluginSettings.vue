@@ -19,6 +19,21 @@ const feedback = ref('')
 const error = ref('')
 const requestPreview = ref('')
 const loadingPreview = ref(false)
+const generatingReport = ref(false)
+const reportUrl = ref('')
+
+async function generateReport() {
+  generatingReport.value = true
+  reportUrl.value = ''
+  error.value = ''
+  try {
+    reportUrl.value = (await api.generateTrialPreview(props.groupId)).url
+  } catch (cause) {
+    error.value = (cause as Error).message
+  } finally {
+    generatingReport.value = false
+  }
+}
 
 async function showRequestPreview() {
   loadingPreview.value = true
@@ -98,6 +113,8 @@ function setJudge(index: number, value: string) {
       </div>
       <a-alert v-if="error" type="error">{{ error }}</a-alert>
       <div class="actions">
+        <a-button v-if="trial" :disabled="dirty || busy" :loading="generatingReport" @click="generateReport">生成示例报告</a-button>
+        <a v-if="trial && reportUrl" :href="reportUrl" target="_blank" rel="noopener">打开 HTML</a>
         <span role="status">{{ dirty ? '有未保存的更改' : feedback }}</span>
         <a-button :disabled="!dirty || busy" @click="reset">还原更改</a-button>
         <a-button type="primary" html-type="submit" :disabled="!dirty" :loading="busy">保存配置</a-button>

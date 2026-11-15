@@ -203,6 +203,8 @@ export const api = {
       }),
     },
   ),
+  generateTrialPreview: (groupId: string) =>
+    request<{ url: string }>(`/reader/trial-preview?group_id=${encodeURIComponent(groupId)}`, { method: 'POST' }),
   trialRequestPreview: (groupId: string) =>
     request<{ text: string }>(`/reader/trial-request-preview?group_id=${encodeURIComponent(groupId)}`),
   trialAi: () => request<GlobalAiSettings & { api_key: string }>('/reader/trial-ai'),

@@ -102,6 +102,22 @@ def preview_chat_summary(request: SummaryPreview):
     })
 
 
+@router.post("/trial-preview")
+def generate_trial_preview(group_id: str):
+    from .plugin.chat_trial.__main__ import preview
+
+    settings = builtin_plugins.config(group_id, "chat_trial", automation.group_plugins(group_id))
+    output = Path(__file__).resolve().parents[1] / "local-data" / "chat-trial-preview" / "index.html"
+    try:
+        preview(output, intro=settings.trial_intro, rules=settings.trial_prompt,
+                summary_rules=settings.trial_summary, judges=settings.trial_judges.splitlines(),
+                clerk_id=settings.trial_clerk)
+    except (OSError, ValueError, global_ai.ChatError) as exc:
+        log.warning("trial_preview_failed", group_id=group_id, error=str(exc))
+        raise HTTPException(502, str(exc)) from exc
+    return {"url": "/api/reader/trial-preview"}
+
+
 @router.get("/trial-request-preview")
 def trial_request_preview(group_id: str):
     from .plugin.chat_trial.__main__ import TRANSCRIPT, judge_prompt
