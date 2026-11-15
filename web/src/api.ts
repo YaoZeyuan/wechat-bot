@@ -237,6 +237,7 @@ export const api = {
     request<SenderJobResult>('/sender/jobs', { method: 'POST', body: JSON.stringify(payload) }),
   senderJob: (id: string) => request<SenderJobResult>(`/sender/jobs/${id}`),
   senderHistoryAi: (id: string) => request<SenderAiLog[]>(`/sender/history/${id}/ai`),
+  senderHistoryTrialHtml: (id: string) => `${BASE}/sender/history/${id}/trial-html`,
   senderHistoryPdf: (id: string) => `${BASE}/sender/history/${id}/pdf`,
   retrySenderJob: (id: string) =>
     request<{ request_id: string }>(`/sender/history/${id}/retry`, { method: 'POST' }),

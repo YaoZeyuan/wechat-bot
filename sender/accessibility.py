@@ -158,7 +158,7 @@ class AccessibilitySender:
 
         user = self.share_user()
         mime = mimetypes.guess_type(filename)[0]
-        if mime not in {"text/plain", "application/pdf", "image/png", "image/jpeg"}:
+        if mime not in {"text/plain", "text/html", "application/pdf", "image/png", "image/jpeg"}:
             raise SendError("附件媒体类型不受支持")
         directory = f"Download/WeChatSender-{uuid4().hex}/"
         collection = "content://media/external/downloads"

@@ -150,8 +150,12 @@ async def upload(asset_id: UUID, filename: str, request: Request):
 
 
 def stage_local_pdf(asset_id: UUID, path: Path, filename: str):
+    stage_local_report(asset_id, path, filename, '.pdf')
+
+
+def stage_local_report(asset_id: UUID, path: Path, filename: str, suffix: str):
     if path.stat().st_size > MAX_ASSET:
-        raise ValueError("生成的 PDF 超过 Sender 的 20 MB 限制")
+        raise ValueError("生成的报告超过 Sender 的 20 MB 限制")
     folder = root / "assets" / str(asset_id)
     folder.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(dir=folder, delete=False) as stream:
@@ -164,7 +168,7 @@ def stage_local_pdf(asset_id: UUID, path: Path, filename: str):
             temporary.unlink(missing_ok=True)
             raise
     try:
-        temporary.replace(folder / "asset.pdf")
+        temporary.replace(folder / f"asset{suffix}")
         (folder / "filename.json").write_text(json.dumps(filename), encoding="utf-8")
     finally:
         temporary.unlink(missing_ok=True)
@@ -246,12 +250,22 @@ def sender_history_pdf(request_id: UUID):
     })
 
 
+@router.get("/history/{request_id}/trial-html")
+def sender_history_trial_html(request_id: UUID):
+    from fastapi.responses import FileResponse
+
+    path = root / "assets" / str(request_id) / "asset.html"
+    if not path.is_file():
+        raise HTTPException(404, "审判报告尚未生成")
+    return FileResponse(path, media_type="text/html", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/history/{request_id}/ai")
 def sender_history_ai(request_id: UUID):
     key = str(request_id)
     with closing(database()) as conn:
         retained = conn.execute(
-            "SELECT 1 FROM sender_history WHERE job_id=? AND source IN ('ai_chat', 'chat_summary', 'member_review')", (key,),
+            "SELECT 1 FROM sender_history WHERE job_id=? AND source IN ('ai_chat', 'chat_summary', 'member_review', 'chat_trial')", (key,),
         ).fetchone()
     if not retained:
         raise HTTPException(404, "AI 任务不存在")
@@ -270,7 +284,8 @@ def sender_history_ai(request_id: UUID):
                     except ValueError:
                         continue
                     if (entry.get("logger") == "wechat_bot.ai_chat"
-                            and entry.get("request_id") == key and entry.get("event") in events):
+                            and (entry.get("request_id") == key or str(entry.get("request_id", "")).startswith(key + ":"))
+                            and entry.get("event") in events):
                         records.append({field: entry[field] for field in fields if field in entry})
         except FileNotFoundError:
             continue
@@ -385,7 +400,7 @@ def run(job, result, *, continues=False):
             assets = {}
             for item in job.messages:
                 if isinstance(item, AssetMessage):
-                    extensions = {".png", ".jpg", ".jpeg"} if item.type == "image" else {".txt", ".pdf"}
+                    extensions = {".png", ".jpg", ".jpeg"} if item.type == "image" else {".txt", ".pdf", ".html"}
                     files = list((root / "assets" / str(item.asset_id)).glob("asset.*"))
                     if len(files) != 1 or files[0].suffix not in extensions:
                         raise ValueError("附件不存在或类型与消息不匹配")

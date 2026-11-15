@@ -93,7 +93,7 @@ def judge_prompt(transcript, intro, rules):
     return f"【群规】\n{intro}\n{rules}\n\n请用可读判词说明结论，并引用对应成员和消息编号。\n\n【原始发言】\n{transcript}"
 
 
-def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id='', evidence=None, auto_warn=False, progress=lambda message: None):
+def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id='', evidence=None, auto_warn=False, request_prefix='', progress=lambda message: None):
     if evidence is None:
         evidence = {
             message_id: {"user_id": user_id, "text": text}
@@ -101,7 +101,7 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
         }
     original = judge_prompt(transcript, intro, rules)
     def call(role, prompt, model=None):
-        request_id = str(uuid4())
+        request_id = f"{request_prefix}:{uuid4()}" if request_prefix else str(uuid4())
         label = f"{role} · {model or '默认模型'}（请求 {request_id}）"
         progress(f"{label} 正在调用")
         try:

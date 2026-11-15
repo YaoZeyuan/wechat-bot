@@ -16,7 +16,7 @@ log = structlog.get_logger("wechat_bot.trial")
 
 def dispatch(source, event, settings):
     from ...group_plugins import robot_wxid
-    from ...sender_jobs import Job, get_job, queue_job, run, save
+    from ...sender_jobs import Job, get_job, queue_job, run, save, stage_local_report
 
     group = event.group_id
     if not group.endswith("@chatroom") or not group.removesuffix("@chatroom").isdigit():
@@ -34,10 +34,11 @@ def dispatch(source, event, settings):
     info = details.get(group, {})
     name = info.get("remark") or info.get("original_name") or group
 
-    def send(key, text, mentions=None):
+    def send(key, text='', mentions=None, *, asset_id=None):
         job_id = uuid5(trial_id, key)
         job = Job(version=1, request_id=job_id, mode="send", target={"kind": "group", "id": group, "name": name},
-                  trigger_text=event.text, messages=[{"type": "text", "text": text, "mentions": mentions or []}])
+                  trigger_text=event.text, messages=[{"type": "file", "asset_id": asset_id}] if asset_id else
+                  [{"type": "text", "text": text, "mentions": mentions or []}])
         result, inserted = queue_job(job, strict=False, source="chat_trial")
         if inserted:
             run(job, result, continues=key == 'start')
@@ -69,17 +70,23 @@ def dispatch(source, event, settings):
     try:
         progress('正在读取审判范围内的群聊记录')
         transcript, names, evidence = read_group(group, settings.trial_hours, settings.trial_limit, before=event)
-        outcome = preview(folder / f"{trial_id}.html", transcript, names, evidence=evidence,
+        report = folder / f"{trial_id}.html"
+        outcome = preview(report, transcript, names, evidence=evidence,
                           rules=settings.trial_prompt, intro=settings.trial_intro, summary_rules=settings.trial_summary,
                           judges=settings.trial_judges.splitlines(), clerk_id=settings.trial_clerk,
-                          auto_warn=settings.trial_auto_warn, progress=progress)
+                          auto_warn=settings.trial_auto_warn, request_prefix=str(history_id), progress=progress)
+        stage_local_report(history_id, report, '群聊审判.html', '.html')
+        progress('HTML 报告已生成，正在发送到原群')
+        delivery = send('report', asset_id=history_id)
+        if delivery != 'completed':
+            raise RuntimeError(f'HTML 报告未确认送达，停止后续警告 · {delivery}')
     except Exception as exc:
         finish("failed", f"审判失败 · {exc}")
         log.exception("trial_group_failed", group_id=group, trial_id=str(trial_id))
         write(state_path, {"status": "failed"})
         return
 
-    progress("HTML 报告已生成")
+    progress("HTML 报告已发送到原群")
     state = {"status": "completed", "members": {}}
     bot = robot_wxid()
     if not bot and (outcome or {}).get("warnings"):

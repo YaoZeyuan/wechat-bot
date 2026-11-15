@@ -57,7 +57,7 @@ async function select(record: SenderHistoryItem) {
   } catch (cause) {
     if (selected.value?.id === record.id) error.value = cause instanceof Error ? cause.message : String(cause)
   }
-  if (['ai_chat', 'chat_summary', 'member_review'].includes(record.source) && selected.value?.id === record.id) {
+  if (['ai_chat', 'chat_summary', 'member_review', 'chat_trial'].includes(record.source) && selected.value?.id === record.id) {
     try {
       const logs = await api.senderHistoryAi(record.id)
       if (selected.value?.id === record.id) aiLogs.value = logs
@@ -97,6 +97,10 @@ onMounted(() => {
     try {
       const job = await api.senderJob(id)
       if (selected.value?.id === id) detail.value = job
+      if (selected.value?.id === id) {
+        const logs = await api.senderHistoryAi(id)
+        if (selected.value?.id === id) aiLogs.value = logs
+      }
     } catch (cause) {
       if (selected.value?.id === id) error.value = (cause as Error).message
     }
@@ -141,12 +145,14 @@ onUnmounted(() => window.clearInterval(progressTimer))
           <h3>触发消息</h3>
           <p style="white-space: pre-wrap; overflow-wrap: anywhere">{{ detail.trigger_text }}</p>
         </section>
+        <a v-if="selected?.source === 'chat_trial' && detail?.steps.includes('HTML 报告已生成，正在发送到原群')"
+          :href="api.senderHistoryTrialHtml(selected.id)" target="_blank" rel="noopener">打开审判 HTML</a>
         <a v-if="selected?.source === 'chat_summary' && detail?.steps.includes('PDF 已就绪，等待手机发送')"
           :href="api.senderHistoryPdf(selected.id)" target="_blank" rel="noopener">在新标签页打开 PDF</a>
         <a-button v-if="selected && detail && selected.source !== 'chat_trial'" :disabled="busy || retrying || ['queued', 'running'].includes(detail.status)"
           @click="retryTarget = selected">重试任务</a-button>
         <p v-if="!selected">请先选择一条任务。</p>
-        <section v-if="selected && ['ai_chat', 'chat_summary', 'member_review'].includes(selected.source)">
+        <section v-if="selected && ['ai_chat', 'chat_summary', 'member_review', 'chat_trial'].includes(selected.source)">
           <h3>模型调用</h3>
           <p v-if="aiError">{{ aiError }}</p>
           <p v-else-if="aiLogs?.length === 0">当前 Server 日志中没有这条任务的模型记录。</p>
