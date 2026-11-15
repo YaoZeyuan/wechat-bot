@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from markdown_it import MarkdownIt
 
-from ...global_ai import generate
+from ...global_ai import ChatError, generate
 
 TRANSCRIPT = """M001 @U01：这份统计只覆盖一所学校，能代表整个城市吗？
 M002 @U02：我觉得能。你要反对就拿全市数据来。
@@ -32,25 +32,40 @@ def judge_prompt(transcript, intro, rules):
     return f"【群规】\n{intro}\n{rules}\n\n【原始发言】\n{transcript}"
 
 
-def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id=''):
+def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id='', progress=lambda message: None):
     original = judge_prompt(transcript, intro, rules)
+    def call(role, prompt, model=None):
+        request_id = str(uuid4())
+        label = f"{role} · {model or '默认模型'}（请求 {request_id}）"
+        progress(f"{label} 正在调用")
+        try:
+            result = generate(prompt, request_id, model_id=model, trial=True)
+        except ChatError as exc:
+            detail = " · ".join([str(exc), *getattr(exc, "__notes__", [])])
+            progress(f"{label} 失败 · {detail}")
+            raise
+        progress(f"{label} 已返回 · {result[2]:.2f} 秒")
+        return result
+
     if len(judges) > 3:
         raise ValueError("法官模型最多配置三个")
     if judges:
         with ThreadPoolExecutor(max_workers=len(judges)) as executor:
-            results = list(executor.map(lambda model: generate(original, str(uuid4()), model_id=model, trial=True), judges))
+            results = list(executor.map(lambda model: call('法官', original, model), judges))
     else:
-        results = [generate(original, str(uuid4()), trial=True)] * 3
-    summary, clerk, summary_elapsed = generate(
+        results = [call('法官', original)] * 3
+    summary, clerk, summary_elapsed = call(
+        '书记官',
         (summary_rules or "汇总法官裁决，用 Markdown 表格对照，保留成员代号并给出处理建议。")
         + "\n\n".join(f"法官 {i}\n{result[0]}" for i, result in enumerate(results, 1)),
-        str(uuid4()), model_id=clerk_id, trial=True,
+        clerk_id,
     )
     cards = "".join(
         f"<details><summary>裁决 {i}<small>{escape(judge)} · {int(elapsed)} 秒</small></summary>"
         f"<article>{render(verdict, names)}</article></details>"
         for i, (verdict, judge, elapsed) in enumerate(results, 1)
     )
+    progress('正在生成 HTML')
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(Template(Path(__file__).with_name("template.html").read_text(encoding="utf-8")).substitute(
         source_label='真实群聊' if real_group else '示例聊天', judge_label='独立模型裁决' if judges else '三份裁决复用同一次模型返回', original=escape(original), cards=cards, clerk=escape(clerk),

@@ -208,8 +208,15 @@ def complete(provider: Provider, model: Model, provider_id: str, prompt: str, sy
         method="POST",
     )
     context = log.bind(request_id=request_id, provider=provider_id, model=model.id)
+    from shlex import quote
+
+    curl = (
+        f'curl -X POST {quote(endpoint)} -H "Authorization: Bearer $MODEL_API_KEY" '
+        f"-H 'Content-Type: application/json' --data-binary {quote(body)}"
+    )
     context.info("ai_chat_request", msg="正在请求模型", method="POST", url=endpoint,
-                 request_bytes=len(request.data), request_body=body if log_bodies else None)
+                 request_bytes=len(request.data), request_body=body if log_bodies else None,
+                 curl=curl if log_bodies else None)
     started = perf_counter()
     try:
         with build_opener(NoRedirect()).open(request, timeout=provider.timeout_seconds) as response:
@@ -229,7 +236,14 @@ def complete(provider: Provider, model: Model, provider_id: str, prompt: str, sy
                 error_body = ""
         context.warning("ai_chat_http_error", msg="模型接口返回错误", status=exc.code,
                         elapsed_seconds=round(perf_counter() - started, 3), response_body=error_body if log_bodies else None)
-        raise ChatError(f"模型接口返回 HTTP {exc.code}") from None
+        failure = ChatError(f"模型接口返回 HTTP {exc.code}")
+        try:
+            detail = json.loads(error_body)["error"]["message"]
+            if isinstance(detail, str):
+                failure.add_note(detail[:1000])
+        except (ValueError, KeyError, TypeError):
+            pass
+        raise failure from None
     except (URLError, OSError):
         context.warning("ai_chat_transport_error", msg="模型接口连接失败或超时",
                         elapsed_seconds=round(perf_counter() - started, 3))

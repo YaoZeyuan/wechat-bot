@@ -16,14 +16,14 @@ from .chat_transcript import read_transcript
 from . import global_ai
 from .plugin import ai_chat
 from .plugin import chat_summary
-from uuid import uuid4
+from uuid import UUID, uuid4
 from urllib.parse import quote
 from pathlib import Path
 from typing import Literal
 from threading import Lock
 from tempfile import NamedTemporaryFile
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field, SecretStr
 
 from .ciphertalk import CipherTalk, SourceError
@@ -102,21 +102,62 @@ def preview_chat_summary(request: SummaryPreview):
     })
 
 
-@router.post("/trial-preview")
-def generate_trial_preview(group_id: str):
+trial_runs: dict[str, dict] = {}
+trial_runs_lock = Lock()
+
+
+@router.get("/trial-preview/status")
+def trial_preview_status(group_id: str):
+    with trial_runs_lock:
+        run = trial_runs.get(group_id)
+        if not run:
+            return {"status": "idle", "steps": []}
+        return {**run, "steps": list(run["steps"])}
+
+
+@router.post("/trial-preview", status_code=202)
+def generate_trial_preview(group_id: str, tasks: BackgroundTasks):
+    with trial_runs_lock:
+        if trial_runs.get(group_id, {}).get("status") != "running":
+            trial_runs[group_id] = {"status": "running", "steps": [], "id": str(uuid4())}
+            tasks.add_task(run_trial_preview, group_id, trial_runs[group_id])
+    return trial_preview_status(group_id)
+
+
+def run_trial_preview(group_id, run):
     from .plugin.chat_trial.__main__ import preview, read_group
 
-    settings = builtin_plugins.config(group_id, "chat_trial", automation.group_plugins(group_id))
-    output = Path(__file__).resolve().parents[1] / "local-data" / "chat-trial-preview" / "index.html"
+    def progress(message):
+        with trial_runs_lock:
+            run["steps"].append(message)
+        log.info("trial_preview_step", group_id=group_id, trial_id=run["id"], msg=message)
+
     try:
+        settings = builtin_plugins.config(group_id, "chat_trial", automation.group_plugins(group_id))
+        output = Path(__file__).resolve().parents[1] / "local-data" / "chat-trial-preview" / f"{run['id']}.html"
+        progress(f"读取本群最近 {settings.trial_hours} 小时内最多 {settings.trial_limit} 条消息")
         transcript, names = read_group(group_id, settings.trial_hours, settings.trial_limit)
         preview(output, transcript, names, real_group=True, intro=settings.trial_intro, rules=settings.trial_prompt,
                 summary_rules=settings.trial_summary, judges=settings.trial_judges.splitlines(),
-                clerk_id=settings.trial_clerk)
-    except (OSError, ValueError, SourceError, global_ai.ChatError) as exc:
-        log.warning("trial_preview_failed", group_id=group_id, error=str(exc))
-        raise HTTPException(502, str(exc)) from exc
-    return {"url": "/api/reader/trial-preview"}
+                clerk_id=settings.trial_clerk, progress=progress)
+        progress("HTML 报告已生成")
+        with trial_runs_lock:
+            run.update(status="completed", url=f"/api/reader/trial-preview/{run['id']}")
+    except Exception as exc:
+        progress(f"审判停止 · {exc}")
+        log.exception("trial_preview_failed", group_id=group_id, trial_id=run["id"])
+        with trial_runs_lock:
+            run.update(status="failed")
+
+
+@router.get("/trial-preview/{report_id}")
+def open_trial_report(report_id: UUID):
+    from fastapi.responses import FileResponse
+
+    path = Path(__file__).resolve().parents[1] / "local-data" / "chat-trial-preview" / f"{report_id}.html"
+    if not path.is_file():
+        raise HTTPException(404, "未找到审判报告")
+    return FileResponse(path, media_type="text/html", headers={"Cache-Control": "no-store"})
 
 
 @router.get("/trial-request-preview")

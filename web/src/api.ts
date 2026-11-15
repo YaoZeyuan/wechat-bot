@@ -203,8 +203,10 @@ export const api = {
       }),
     },
   ),
+  trialPreviewStatus: (groupId: string) =>
+    request<{ status: string; steps: string[]; url?: string }>(`/reader/trial-preview/status?group_id=${encodeURIComponent(groupId)}`),
   generateTrialPreview: (groupId: string) =>
-    request<{ url: string }>(`/reader/trial-preview?group_id=${encodeURIComponent(groupId)}`, { method: 'POST' }),
+    request<{ status: string; steps: string[]; url?: string }>(`/reader/trial-preview?group_id=${encodeURIComponent(groupId)}`, { method: 'POST' }),
   trialRequestPreview: (groupId: string) =>
     request<{ text: string }>(`/reader/trial-request-preview?group_id=${encodeURIComponent(groupId)}`),
   trialAi: () => request<GlobalAiSettings & { api_key: string }>('/reader/trial-ai'),

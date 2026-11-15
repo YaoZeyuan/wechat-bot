@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Card as ACard, Input as AInput, Textarea as ATextarea } from '@arco-design/web-vue'
 import { api, type GroupPlugin } from './api'
 
@@ -22,12 +22,24 @@ const loadingPreview = ref(false)
 const generatingReport = ref(false)
 const reportUrl = ref('')
 
-async function generateReport() {
+const reportSteps = ref<string[]>([])
+let disposed = false
+onUnmounted(() => { disposed = true })
+onMounted(() => { if (trial.value) void followReport(false) })
+
+async function followReport(start: boolean) {
   generatingReport.value = true
-  reportUrl.value = ''
   error.value = ''
   try {
-    reportUrl.value = (await api.generateTrialPreview(props.groupId)).url
+    let report = await (start ? api.generateTrialPreview : api.trialPreviewStatus)(props.groupId)
+    while (!disposed) {
+      reportSteps.value = report.steps
+      reportUrl.value = report.url ?? ''
+      if (report.status !== 'running') break
+      await new Promise(resolve => window.setTimeout(resolve, 1000))
+      if (disposed) break
+      report = await api.trialPreviewStatus(props.groupId)
+    }
   } catch (cause) {
     error.value = (cause as Error).message
   } finally {
@@ -112,8 +124,11 @@ function setJudge(index: number, value: string) {
         <pre v-if="requestPreview && !dirty" class="request-preview">{{ requestPreview }}</pre>
       </div>
       <a-alert v-if="error" type="error">{{ error }}</a-alert>
+      <ol v-if="reportSteps.length" aria-live="polite">
+        <li v-for="(step, index) in reportSteps" :key="index">{{ step }}</li>
+      </ol>
       <div class="actions">
-        <a-button v-if="trial" :disabled="dirty || busy" :loading="generatingReport" @click="generateReport">执行审判并生成 HTML</a-button>
+        <a-button v-if="trial" :disabled="dirty || busy" :loading="generatingReport" @click="followReport(true)">执行审判并生成 HTML</a-button>
         <a v-if="trial && reportUrl" :href="reportUrl" target="_blank" rel="noopener">打开 HTML</a>
         <span role="status">{{ dirty ? '有未保存的更改' : feedback }}</span>
         <a-button :disabled="!dirty || busy" @click="reset">还原更改</a-button>
