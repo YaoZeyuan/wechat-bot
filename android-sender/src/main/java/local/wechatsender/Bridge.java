@@ -125,9 +125,16 @@ public final class Bridge extends AccessibilityService {
             }
             input = unique(AccessibilityNodeInfo::isEditable, "聊天输入框");
             String prefix = value(input.getText()).toString();
+            Bundle cursor = new Bundle();
+            cursor.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, prefix.length());
+            cursor.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, prefix.length());
+            require(input.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, cursor),
+                "无法将光标移到 @成员之后");
             paste(input, text);
             text = prefix + text;
-            require(input.refresh() && text.contentEquals(value(input.getText())), "@成员或正文未通过校验");
+            String actual = value(unique(AccessibilityNodeInfo::isEditable, "聊天输入框").getText()).toString();
+            require(text.equals(actual), "@成员或正文未通过校验；预期长度 " + text.length()
+                + "，实际长度 " + actual.length() + "，实际保留 @前缀：" + actual.startsWith(prefix));
         } else {
             setText(input, text);
         }
