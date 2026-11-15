@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .reply import MessageEvent
 from .plugin import ai_chat
@@ -30,10 +30,22 @@ class Settings(BaseModel):
     trial_hours: int = Field(default=1, ge=1, le=24)
     trial_limit: int = Field(default=300, ge=1, le=5000)
     trial_cooldown: int = Field(default=3, ge=1, le=60)
+    trial_intro: str = Field(default="", max_length=16000)
+    trial_summary: str = Field(default="", max_length=16000)
+    trial_judges: str = Field(default="", max_length=770)
+    trial_clerk: str = Field(default="", max_length=256)
     trial_prompt: str = Field(default="", max_length=16000)
     max_chars: int = Field(default=300, gt=0)
     assistant_name: str | None = Field(default=None, max_length=80)
     intro_reply: str | None = Field(default=None, max_length=2500)
+
+    @field_validator("trial_judges")
+    @classmethod
+    def clean_trial_judges(cls, value: str) -> str:
+        models = [line.strip() for line in value.splitlines() if line.strip()]
+        if len(models) > 3 or any(len(model) > 256 for model in models):
+            raise ValueError("最多配置三个法官模型，每个模型 ID 最多 256 字符")
+        return "\n".join(models)
 
 
 class Defaults(Settings):

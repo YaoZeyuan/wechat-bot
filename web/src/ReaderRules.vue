@@ -228,7 +228,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
             </div>
           </section>
           <a-modal :visible="!!detailPlugin" :title="detailPlugin?.name" :footer="false"
-            :width="'min(680px, 94vw)'" @cancel="activePlugin = ''">
+            :width="detailPlugin?.id === 'chat_trial' ? 'min(1040px, 95vw)' : 'min(680px, 94vw)'" @cancel="activePlugin = ''">
             <template v-if="detailPlugin">
               <p>{{ detailPlugin.description }}</p>
               <PluginSettings v-if="detailPlugin.fields?.length" :key="groupId + ':' + detailPlugin.id"
@@ -237,8 +237,6 @@ onUnmounted(() => window.clearInterval(refreshTimer))
                 :plugin="detailPlugin" @saved="updatePlugin" />
               <AiChatSettings v-if="detailPlugin.id === 'ai_chat'" :key="groupId" :group-id="groupId" />
               <SummaryPreview v-if="detailPlugin.id === 'chat_summary'" :group-id="groupId" />
-              <a v-if="detailPlugin.id === 'chat_trial'" href="/api/reader/trial-preview"
-                target="_blank" rel="noopener">打开最近生成的审判报告</a>
             </template>
           </a-modal>
         </template>

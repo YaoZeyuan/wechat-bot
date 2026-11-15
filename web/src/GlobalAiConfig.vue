@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { api, type GlobalAiSettings } from './api'
 
+const props = defineProps<{ trial?: boolean }>()
 const settings = ref<GlobalAiSettings>()
 const apiKey = ref('')
 const busy = ref(false)
@@ -12,7 +13,7 @@ async function load() {
   busy.value = true
   error.value = ''
   try {
-    settings.value = await api.globalAi()
+    settings.value = await (props.trial ? api.trialAi() : api.globalAi())
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -27,7 +28,7 @@ async function save() {
   saved.value = false
   const { has_api_key, ...payload } = settings.value
   try {
-    settings.value = await api.saveGlobalAi({ ...payload, api_key: apiKey.value })
+    settings.value = await (props.trial ? api.saveTrialAi : api.saveGlobalAi)({ ...payload, api_key: apiKey.value })
     apiKey.value = ''
     saved.value = true
   } catch (cause) {
@@ -58,7 +59,7 @@ onMounted(load)
         <select v-model="settings.thinking"><option value="disabled">关闭</option><option value="enabled">开启</option><option :value="null">服务商默认</option></select>
       </label>
       <label>超时（秒） <input v-model.number="settings.timeout_seconds" type="number" min="1" max="600" required /></label>
-      <label class="prompt">群聊梳理提示词 <textarea v-model="settings.summary_prompt" rows="14" maxlength="16000" required /></label>
+      <label v-if="!trial" class="prompt">群聊梳理提示词 <textarea v-model="settings.summary_prompt" rows="14" maxlength="16000" required /></label>
       <a-button html-type="submit" type="primary" :loading="busy">保存 AI 配置</a-button>
     </form>
     <a-button v-else-if="error" @click="load">重新读取</a-button>

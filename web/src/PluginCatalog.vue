@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import GlobalAiConfig from './GlobalAiConfig.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Card as ACard, Empty as AEmpty, InputSearch as AInputSearch, Spin as ASpin, Switch as ASwitch, Input as AInput, Textarea as ATextarea } from '@arco-design/web-vue'
@@ -20,7 +21,7 @@ const filtered = computed(() => {
 const active = computed(() => plugins.value.find(plugin => plugin.id === route.query.plugin) ?? filtered.value[0])
 const saving = ref(false)
 const saved = ref(false)
-const draft = ref({ global_enabled: true, enabled: false, assistant_name: '', intro_reply: '', history_count: 300, max_chars: 300, trial_hours: 1, trial_limit: 300, trial_cooldown: 3, trial_prompt: '' })
+const draft = ref({ global_enabled: true, enabled: false, assistant_name: '', intro_reply: '', history_count: 300, max_chars: 300, trial_hours: 1, trial_limit: 300, trial_cooldown: 3, trial_prompt: '', trial_intro: '', trial_summary: '', trial_judges: '', trial_clerk: '' })
 watch(active, plugin => {
   draft.value = {
     global_enabled: plugin?.global_enabled ?? true,
@@ -33,6 +34,10 @@ watch(active, plugin => {
     trial_limit: plugin?.trial_limit ?? 300,
     trial_cooldown: plugin?.trial_cooldown ?? 3,
     trial_prompt: plugin?.trial_prompt ?? '',
+    trial_intro: plugin?.trial_intro ?? '',
+    trial_summary: plugin?.trial_summary ?? '',
+    trial_judges: plugin?.trial_judges ?? '',
+    trial_clerk: plugin?.trial_clerk ?? '',
   }
   saved.value = false
 })
@@ -71,6 +76,11 @@ async function load() {
   }
 }
 onMounted(load)
+function setJudge(index: number, value: string) {
+  const slots = (draft.value.trial_judges ?? '').split('\n')
+  slots[index] = value
+  draft.value.trial_judges = slots.join('\n')
+}
 </script>
 
 <template>
@@ -106,6 +116,7 @@ onMounted(load)
         <div class="detail-tags">
           <a-tag>{{ active.capability }}</a-tag>
         </div>
+        <GlobalAiConfig v-if="active?.id === 'chat_trial'" trial />
         <form class="defaults" @submit.prevent="save">
           <label class="setting"><span>全局启用<small>关闭后，所有群暂停运行此插件。</small></span>
             <a-switch v-model="draft.global_enabled" aria-label="全局启用" :disabled="saving" />
@@ -116,7 +127,14 @@ onMounted(load)
           <template v-if="active.fields?.length">
             <h3>默认参数</h3>
             <p>尚未保存本群参数的群会使用这些值。</p>
-            <label v-for="field in active.fields" :key="field.key" class="parameter">
+            <div v-if="active.id === 'chat_trial'" class="judge-slots">
+          <label v-for="slot in 3" :key="slot">
+            法官{{ slot }}号
+            <a-input :model-value="draft.trial_judges?.split('\n')[slot - 1] ?? ''"
+              :max-length="256" @update:model-value="value => setJudge(slot - 1, value)" />
+          </label>
+        </div>
+        <label v-for="field in active.fields?.filter(item => item.key !== 'trial_judges')" :key="field.key" class="parameter">
               {{ field.label }}
               <input v-if="field.key === 'history_count' || field.key === 'max_chars' || field.key === 'trial_hours' || field.key === 'trial_limit' || field.key === 'trial_cooldown'"
                 v-model.number="draft[field.key]" type="number" min="1" :max="field.max" required :disabled="saving" />
@@ -135,6 +153,8 @@ onMounted(load)
 </template>
 
 <style scoped>
+.judge-slots { display: grid; gap: 12px; margin: 12px 0; }
+.judge-slots label { display: grid; gap: 6px; }
 .plugin-page { max-width: 1260px; }
 .plugin-header,.detail-title,.scope,.detail-tags { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .plugin-header { justify-content: space-between; margin-bottom: 20px; }

@@ -6,6 +6,17 @@ import { api, type GroupPlugin } from './api'
 const props = defineProps<{ plugin: GroupPlugin; groupId: string }>()
 const emit = defineEmits<{ saved: [GroupPlugin] }>()
 const draft = ref({ ...props.plugin })
+const trial = computed(() => props.plugin.id === 'chat_trial')
+const tab = ref('before')
+const tabs = [
+  { id: 'before', label: '审判前配置', fields: ['trial_hours', 'trial_limit', 'trial_cooldown', 'trial_intro'] },
+  { id: 'rules', label: '审判规则', fields: ['trial_prompt'] },
+  { id: 'summary', label: '汇总规则', fields: ['trial_summary'] },
+  { id: 'models', label: '模型配置', fields: ['trial_judges', 'trial_clerk'] },
+  { id: 'preview', label: '最终判词预览', fields: [] },
+]
+const fields = computed(() => (props.plugin.fields ?? []).filter(field =>
+  !trial.value || tabs.find(item => item.id === tab.value)?.fields.includes(field.key)))
 const busy = ref(false)
 const feedback = ref('')
 const error = ref('')
@@ -25,7 +36,7 @@ async function save() {
   error.value = ''
   try {
     const plugin = await api.saveGroupPlugin(props.groupId, draft.value.id, draft.value.enabled,
-      draft.value.assistant_name, draft.value.intro_reply, draft.value.history_count, draft.value.max_chars, undefined, {trial_hours: draft.value.trial_hours, trial_limit: draft.value.trial_limit, trial_cooldown: draft.value.trial_cooldown, trial_prompt: draft.value.trial_prompt})
+      draft.value.assistant_name, draft.value.intro_reply, draft.value.history_count, draft.value.max_chars, undefined, {trial_hours: draft.value.trial_hours, trial_limit: draft.value.trial_limit, trial_cooldown: draft.value.trial_cooldown, trial_prompt: draft.value.trial_prompt, trial_intro: draft.value.trial_intro, trial_summary: draft.value.trial_summary, trial_judges: draft.value.trial_judges, trial_clerk: draft.value.trial_clerk})
     emit('saved', plugin)
     await Promise.resolve()
     feedback.value = '配置已保存'
@@ -35,12 +46,33 @@ async function save() {
     busy.value = false
   }
 }
+function setJudge(index: number, value: string) {
+  const slots = (draft.value.trial_judges ?? '').split('\n')
+  slots[index] = value
+  draft.value.trial_judges = slots.join('\n')
+}
 </script>
 
 <template>
   <a-card :bordered="false" class="plugin-settings">
     <form @submit.prevent="save">
-      <div v-for="field in plugin.fields" :key="field.key" class="settings-row field">
+      <a-tabs v-if="trial" v-model:active-key="tab">
+        <a-tab-pane v-for="item in tabs" :key="item.id" :title="item.label" />
+      </a-tabs>
+      <p v-if="trial && tab === 'models'">接口地址和 API Key 在「插件管理 → 审判」统一配置。模型 ID 留空时使用默认模型。</p>
+      <p v-if="trial && tab === 'preview'">
+        <a href="/api/reader/trial-preview" target="_blank" rel="noopener">打开最近生成的审判报告</a>
+        <br />保存后运行下方命令，使用本群消息重新生成报告。
+        <br /><code>uv run python -m server.plugin.chat_trial --group '{{ groupId }}'</code>
+      </p>
+      <div v-if="trial && tab === 'models'" class="judge-slots">
+          <label v-for="slot in 3" :key="slot">
+            法官{{ slot }}号
+            <a-input :model-value="draft.trial_judges?.split('\n')[slot - 1] ?? ''"
+              :max-length="256" @update:model-value="value => setJudge(slot - 1, value)" />
+          </label>
+        </div>
+        <div v-for="field in fields?.filter(item => item.key !== 'trial_judges')" :key="field.key" class="settings-row field">
         <label :for="`plugin-${field.key}`">{{ field.label }}<small v-if="field.description">{{ field.description }}</small></label>
         <input v-if="field.key === 'history_count' || field.key === 'max_chars' || field.key === 'trial_hours' || field.key === 'trial_limit' || field.key === 'trial_cooldown'"
           :id="`plugin-${field.key}`" v-model.number="draft[field.key]" type="number" min="1" :max="field.max" required :disabled="busy" />
@@ -62,6 +94,8 @@ async function save() {
 </template>
 
 <style scoped>
+.judge-slots { display: grid; gap: 12px; margin: 12px 0; }
+.judge-slots label { display: grid; gap: 6px; }
 .plugin-settings { background: var(--color-fill-1); border-radius: 12px; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 0; }
 .settings-row + .settings-row { border-top: 1px solid var(--color-border-2); }

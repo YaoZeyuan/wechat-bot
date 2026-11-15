@@ -2,6 +2,7 @@
 import argparse
 import re
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 from html import escape
 from time import time
 from pathlib import Path
@@ -27,21 +28,28 @@ def render(text, names):
     return MARKDOWN.render(text)
 
 
-def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT):
-    original = f"【群规】\n{rules}\n\n【原始发言】\n{transcript}"
-    verdict, judge, elapsed = generate(original, str(uuid4()))
+def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id=''):
+    original = f"【群规】\n{intro}\n{rules}\n\n【原始发言】\n{transcript}"
+    if len(judges) > 3:
+        raise ValueError("法官模型最多配置三个")
+    if judges:
+        with ThreadPoolExecutor(max_workers=len(judges)) as executor:
+            results = list(executor.map(lambda model: generate(original, str(uuid4()), model_id=model, trial=True), judges))
+    else:
+        results = [generate(original, str(uuid4()), trial=True)] * 3
     summary, clerk, summary_elapsed = generate(
-        "汇总以下三位法官的裁决。用 Markdown 表格对照，保留成员代号，给出处理建议。\n\n"
-        + "\n\n".join(f"法官 {i}\n{verdict}" for i in range(1, 4)),
-        str(uuid4()),
+        (summary_rules or "汇总法官裁决，用 Markdown 表格对照，保留成员代号并给出处理建议。")
+        + "\n\n".join(f"法官 {i}\n{result[0]}" for i, result in enumerate(results, 1)),
+        str(uuid4()), model_id=clerk_id, trial=True,
     )
     cards = "".join(
         f"<details><summary>裁决 {i}<small>{escape(judge)} · {int(elapsed)} 秒</small></summary>"
-        f"<article>{render(verdict, names)}</article></details>" for i in range(1, 4)
+        f"<article>{render(verdict, names)}</article></details>"
+        for i, (verdict, judge, elapsed) in enumerate(results, 1)
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(Template(Path(__file__).with_name("template.html").read_text(encoding="utf-8")).substitute(
-        source_label='真实群聊' if real_group else '示例聊天', original=escape(original), cards=cards, clerk=escape(clerk),
+        source_label='真实群聊' if real_group else '示例聊天', judge_label='独立模型裁决' if judges else '三份裁决复用同一次模型返回', original=escape(original), cards=cards, clerk=escape(clerk),
         seconds=int(summary_elapsed), summary=render(summary, names),
     ), encoding="utf-8")
 
@@ -91,7 +99,10 @@ if __name__ == "__main__":
 
         settings = config(args.group, PLUGIN_ID, automation.group_plugins(args.group))
         transcript, names = read_group(args.group, args.hours or settings.trial_hours, args.limit or settings.trial_limit)
-        preview(output, transcript, names, real_group=True, rules=settings.trial_prompt or PROMPT)
+        preview(output, transcript, names, real_group=True, rules=settings.trial_prompt or PROMPT,
+                intro=settings.trial_intro, summary_rules=settings.trial_summary,
+                judges=[line.strip() for line in settings.trial_judges.splitlines() if line.strip()],
+                clerk_id=settings.trial_clerk)
     elif args.sample:
         with patch(__name__ + ".generate", side_effect=[
             ("M004 对 @U01 使用辱骂，违反禁止人身攻击的群规。", "示例法官", 2),
