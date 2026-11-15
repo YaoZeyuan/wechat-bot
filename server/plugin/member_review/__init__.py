@@ -48,10 +48,12 @@ STYLES = {
 
 
 def command(event):
-    match = re.fullmatch(r"(赞美|锐评)(?:\s*@(.+))?", event.text.strip())
+    match = re.fullmatch(r"(赞美|夸夸|锐评)(?:\s*@(.+))?", event.text.strip())
     if not match:
         return None
     action, label = match.groups()
+    if action == "夸夸":
+        action = "赞美"
     if label is None:
         return (action, event.sender_id, None) if not event.mentioned_user_ids else None
     if len(event.mentioned_user_ids) != 1:
