@@ -325,12 +325,12 @@ onMounted(async () => {
         <a-button type="primary" html-type="submit" :loading="exportBusy">下载 TXT</a-button>
       </form>
     </a-modal>
-    <a-modal v-model:visible="membersVisible" title="群成员" :footer="false">
+    <a-modal v-model:visible="membersVisible" :title="memberDetail ? '成员详情' : '群成员'" :width="'min(820px, 94vw)'" :footer="false">
       <a-alert v-if="membersError" type="error">{{ membersError }}</a-alert>
       <p v-else-if="membersBusy" role="status">正在读取群成员…</p>
       <template v-else-if="memberDetail">
-        <a-button @click="memberDetail = undefined">返回列表</a-button>
-        <dl style="overflow-wrap: anywhere">
+        <a-button type="text" @click="memberDetail = undefined">← 返回成员列表</a-button>
+        <dl class="member-profile">
           <dt>成员 ID</dt><dd>{{ memberDetail.id }}</dd>
           <dt>群昵称</dt><dd>{{ memberDetail.group_nickname || '未设置' }}</dd>
           <dt>微信昵称</dt><dd>{{ memberDetail.original_name || '未设置' }}</dd>
@@ -338,13 +338,23 @@ onMounted(async () => {
         </dl>
       </template>
       <template v-else>
-        <input v-model="memberQuery" placeholder="搜索昵称、备注或成员 ID" aria-label="搜索群成员" />
-        <p>显示 {{ filteredMembers.length }} / {{ memberList.length }} 位成员</p>
-        <ul style="max-height: 50vh; overflow-y: auto">
-          <li v-for="member in filteredMembers" :key="member.id">
-            {{ member.name }} <a-button size="mini" @click="memberDetail = member">查看详情</a-button>
-          </li>
-        </ul>
+        <div class="member-toolbar">
+          <input v-model="memberQuery" placeholder="搜索昵称、备注或成员 ID" aria-label="搜索群成员" />
+          <span>显示 {{ filteredMembers.length }} / {{ memberList.length }} 位成员</span>
+        </div>
+        <div class="member-table">
+          <table>
+            <thead><tr><th scope="col">成员 / ID</th><th scope="col">微信昵称</th><th scope="col">操作</th></tr></thead>
+            <tbody>
+              <tr v-for="member in filteredMembers" :key="member.id">
+                <td><strong>{{ member.name }}</strong><small>{{ member.id }}</small></td>
+                <td>{{ member.original_name || '—' }}</td>
+                <td><a-button type="text" size="small" @click="memberDetail = member">查看详情</a-button></td>
+              </tr>
+              <tr v-if="!filteredMembers.length"><td colspan="3" class="member-empty">没有找到匹配的成员</td></tr>
+            </tbody>
+          </table>
+        </div>
       </template>
     </a-modal>
     <a-modal v-model:visible="detailsVisible" title="会话详情" :footer="false">
@@ -360,6 +370,21 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.member-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.member-toolbar input { flex: 1 1 240px; min-width: 0; }
+.member-toolbar span, .member-table small { color: var(--color-text-3); }
+.member-table { max-height: 50vh; overflow: auto; border: 1px solid var(--color-border-2); border-radius: 10px; }
+.member-table table { width: 100%; border-collapse: separate; border-spacing: 0; text-align: left; }
+.member-table th, .member-table td { padding: 12px 16px; border-bottom: 1px solid var(--color-border-2); overflow-wrap: anywhere; }
+.member-table th { position: sticky; top: 0; background: var(--color-fill-2); font-weight: 600; }
+.member-table td:last-child, .member-table th:last-child { text-align: right; white-space: nowrap; }
+.member-table tr:last-child td { border-bottom: 0; }
+.member-table tbody tr:hover { background: var(--color-fill-1); }
+.member-table small { display: block; margin-top: 4px; }
+.member-table td.member-empty { text-align: center; color: var(--color-text-3); padding: 24px; }
+.member-profile { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px 20px; padding: 16px; border-radius: 10px; background: var(--color-fill-1); }
+.member-profile dt { color: var(--color-text-3); }
+.member-profile dd { margin: 0; overflow-wrap: anywhere; }
 .export-form { display: grid; gap: 12px; }
 .export-form label { display: grid; gap: 4px; }
 .history-page { max-width: 1440px; margin: auto; padding: 24px clamp(12px, 3vw, 40px); }
