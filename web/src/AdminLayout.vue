@@ -1,19 +1,39 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
+import { Message } from '@arco-design/web-vue'
 import { useRoute } from 'vue-router'
 import { api } from './api'
 
 const connected = ref<boolean | null>(null)
+const confirmRestart = ref(false)
+const restartingAdb = ref(false)
+
+async function restartAdb() {
+  if (restartingAdb.value) return
+  restartingAdb.value = true
+  try {
+    connected.value = (await api.restartAdb()).connected
+    confirmRestart.value = false
+    Message.success(connected.value ? 'ADB 已重启，手机已连接' : 'ADB 已重启，等待手机连接')
+  } catch (cause) {
+    Message.error((cause as Error).message)
+  } finally {
+    restartingAdb.value = false
+    void refreshPhoneStatus()
+  }
+}
+
 let timer: number | undefined
 let checking = false
 
 async function refreshPhoneStatus() {
-  if (document.hidden || checking) return
+  if (document.hidden || checking || restartingAdb.value) return
   checking = true
   try {
-    connected.value = (await api.senderStatus()).connected
+    const status = await api.senderStatus()
+    if (!restartingAdb.value) connected.value = status.connected
   } catch {
-    connected.value = null
+    if (!restartingAdb.value) connected.value = null
   } finally {
     checking = false
   }
@@ -55,12 +75,21 @@ const tabs = [
     <a-layout class="admin-main">
       <a-layout-header class="admin-header">
         <span>{{ tabs.find(item => item.path === route.path)?.label }}</span>
+        <div class="header-actions">
         <a-tag :color="connected === true ? 'green' : connected === false ? 'orange' : 'gray'" role="status">
           {{ connected === true ? '手机已连接' : connected === false ? '手机不可用' : '手机状态待确认' }}
         </a-tag>
+        <a-button size="small" :loading="restartingAdb" @click="confirmRestart = true">重启 ADB</a-button>
+        </div>
       </a-layout-header>
       <a-layout-content class="admin-content"><RouterView /></a-layout-content>
     </a-layout>
+    <a-modal :visible="confirmRestart" title="重启 ADB 服务" ok-text="确认重启"
+      :ok-button-props="{ status: 'danger' }" :ok-loading="restartingAdb"
+      :closable="!restartingAdb" :mask-closable="false" :esc-to-close="!restartingAdb"
+      @ok="restartAdb" @cancel="!restartingAdb && (confirmRestart = false)">
+      重启会暂时断开手机调试连接，无线调试可能需要重新连接。
+    </a-modal>
   </a-layout>
 </template>
 
@@ -75,6 +104,7 @@ nav a:hover { background: #22334b; color: white; }
 nav a.router-link-exact-active { background: #304669; color: white; font-weight: 600; }
 .admin-main,.admin-content { min-width: 0; }
 .admin-header { display: flex; align-items: center; justify-content: space-between; min-height: 56px; padding: 0 clamp(16px, 3vw, 40px); background: white; border-bottom: 1px solid var(--console-border); font-weight: 600; }
+.header-actions { display: flex; align-items: center; gap: 8px; }
 @media (max-width: 760px) {
   .admin-layout { flex-direction: column; }
   .sidebar { position: static; height: auto; flex: none; padding: 10px 14px; }
