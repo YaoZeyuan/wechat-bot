@@ -1,5 +1,6 @@
 """Versioned phone tasks and their durable results."""
 import json
+import re
 import shutil
 import sqlite3
 from contextlib import closing
@@ -217,7 +218,7 @@ def sender_history(offset: int = 0, limit: int = 50):
 def retry_sender_job(request_id: UUID, tasks: BackgroundTasks):
     with closing(database()) as conn:
         row = conn.execute(
-            "SELECT j.payload, j.result FROM sender_history h JOIN jobs j ON j.id=h.job_id WHERE h.job_id=?",
+            "SELECT j.payload, j.result, h.source FROM sender_history h JOIN jobs j ON j.id=h.job_id WHERE h.job_id=?",
             (str(request_id),),
         ).fetchone()
     if row is None:
@@ -225,6 +226,25 @@ def retry_sender_job(request_id: UUID, tasks: BackgroundTasks):
     if json.loads(row[1])["status"] in {"queued", "running"}:
         raise HTTPException(409, "请等原任务执行结束后再重试")
     original = Job.model_validate_json(row[0])
+    if row[2] == "chat_trial":
+        from .plugin.chat_trial.dispatch import ROOT, resume
+
+        result = json.loads(row[1])
+        group = original.target.id
+        if not result.get("trial_resumable") or result["status"] != "failed" or not re.fullmatch(r"[0-9]+@chatroom", group):
+            raise HTTPException(409, "此审判任务没有可续跑的失败步骤")
+        context_path = ROOT / group / f"{request_id}.resume.json"
+        if not context_path.is_file():
+            raise HTTPException(409, "找不到本轮审判续跑数据")
+        context = json.loads(context_path.read_text(encoding="utf-8"))
+        result["status"] = "running"
+        with closing(database()) as conn, conn:
+            changed = conn.execute("UPDATE jobs SET result=? WHERE id=? AND result=?",
+                                   (json.dumps(result), str(request_id), row[1])).rowcount
+        if not changed:
+            raise HTTPException(409, "审判状态已变更，请刷新")
+        tasks.add_task(resume, group, request_id, context)
+        return result
     job = original.model_copy(update={"request_id": uuid4()})
     result, _ = queue_job(job, source="retry")
     tasks.add_task(run, job, result)

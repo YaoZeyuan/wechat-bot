@@ -93,7 +93,7 @@ def judge_prompt(transcript, intro, rules):
     return f"【群规】\n{intro}\n{rules}\n\n请用可读判词说明结论，并引用对应成员和消息编号。\n\n【原始发言】\n{transcript}"
 
 
-def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id='', evidence=None, auto_warn=False, request_prefix='', progress=lambda message: None):
+def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id='', evidence=None, auto_warn=False, request_prefix='', cache_dir=None, progress=lambda message: None):
     if evidence is None:
         evidence = {
             message_id: {"user_id": user_id, "text": text}
@@ -101,6 +101,15 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
         }
     original = judge_prompt(transcript, intro, rules)
     def call(role, prompt, model=None):
+        from hashlib import sha256
+
+        saved = None
+        if cache_dir is not None and role != "处罚书记官":
+            key = sha256(json.dumps([role, model, prompt]).encode()).hexdigest()
+            saved = cache_dir / f"{key}.json"
+            if saved.exists():
+                progress(f"{role} · {model or '默认模型'} 已复用上次结果")
+                return json.loads(saved.read_text(encoding="utf-8"))
         request_id = f"{request_prefix}:{uuid4()}" if request_prefix else str(uuid4())
         label = f"{role} · {model or '默认模型'}（请求 {request_id}）"
         progress(f"{label} 正在调用")
@@ -111,6 +120,10 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
             progress(f"{label} 失败 · {detail}")
             raise
         progress(f"{label} 已返回 · {result[2]:.2f} 秒")
+        if saved is not None:
+            from ..group_order import write
+
+            write(saved, result)
         return result
 
     if len(judges) > 3:
@@ -135,6 +148,7 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
             extracted, _, _ = call(
                 "处罚书记官",
                 OUTPUT_RULES + "\n只提取每位法官均明确认定违规的同一条消息。"
+                "reason 会公开发送给群成员，请直接引用或描述违规发言本身，原因中不要出现 M007 等消息编号。"
                 "每条违规需提供 excerpts 数组，按法官顺序逐字引用支持这一裁决的原文片段。"
                 "\n\n" + original + "\n\n" + judge_text,
                 clerk_id,

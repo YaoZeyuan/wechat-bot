@@ -178,6 +178,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 interface SenderJobResult {
+  trial_resumable?: boolean
   trigger_text?: string
   status: string
   steps: string[]

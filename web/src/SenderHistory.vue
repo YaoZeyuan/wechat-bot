@@ -149,8 +149,8 @@ onUnmounted(() => window.clearInterval(progressTimer))
           :href="api.senderHistoryTrialHtml(selected.id)" target="_blank" rel="noopener">打开审判 HTML</a>
         <a v-if="selected?.source === 'chat_summary' && detail?.steps.includes('PDF 已就绪，等待手机发送')"
           :href="api.senderHistoryPdf(selected.id)" target="_blank" rel="noopener">在新标签页打开 PDF</a>
-        <a-button v-if="selected && detail && selected.source !== 'chat_trial'" :disabled="busy || retrying || ['queued', 'running'].includes(detail.status)"
-          @click="retryTarget = selected">重试任务</a-button>
+        <a-button v-if="selected && detail && (selected.source !== 'chat_trial' || (detail.trial_resumable && detail.status === 'failed'))" :disabled="busy || retrying || ['queued', 'running'].includes(detail.status)"
+          @click="retryTarget = selected">{{ selected.source === 'chat_trial' ? '续跑审判' : '重试任务' }}</a-button>
         <p v-if="!selected">请先选择一条任务。</p>
         <section v-if="selected && ['ai_chat', 'chat_summary', 'member_review', 'chat_trial'].includes(selected.source)">
           <h3>模型调用</h3>
@@ -184,8 +184,9 @@ onUnmounted(() => window.clearInterval(progressTimer))
       </section>
     </div>
     <a-modal :visible="!!retryTarget" title="重试 Sender 任务" :ok-loading="retrying"
-      ok-text="创建并执行" @ok="retry" @cancel="!retrying && (retryTarget = undefined)">
-      将新建任务并从第一条消息开始执行，沿用原任务的发送或演练模式。实际发送过的内容可能重复送达。
+      :ok-text="retryTarget?.source === 'chat_trial' ? '续跑审判' : '创建并执行'" @ok="retry" @cancel="!retrying && (retryTarget = undefined)">
+      <p v-if="retryTarget?.source === 'chat_trial'">复用已完成的步骤。发送结果待核对时，暂停该成员的后续处理。</p>
+      <p v-else>将新建任务并从第一条消息开始执行，沿用原任务的发送或演练模式。实际发送过的内容可能重复送达。</p>
       <a-alert v-if="error" type="error">{{ error }}</a-alert>
     </a-modal>
   </main>
