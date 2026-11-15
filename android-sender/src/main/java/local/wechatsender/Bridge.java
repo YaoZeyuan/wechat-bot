@@ -121,7 +121,7 @@ public final class Bridge extends AccessibilityService {
             require(mentions.length() > 0 && mentions.length() <= 10, "@成员数量无效");
             String position = request.optString("mention_position", "end");
             require(position.equals("start") || position.equals("end"), "@位置无效");
-            if (position.equals("end")) setText(input, text + "\n");
+            if (position.equals("end")) writeText(input, text + "\n");
             for (int i = 0; i < mentions.length(); i++) {
                 JSONObject member = mentions.getJSONObject(i);
                 addMention(target, member.getString("group_nickname"), member.getString("username"), member.isNull("remark") ? "" : member.optString("remark"), request.optBoolean("mention_progress"), reader, writer);
@@ -141,7 +141,7 @@ public final class Bridge extends AccessibilityService {
                 text = prefix + text;
             }
         } else {
-            setText(input, text);
+            writeText(input, text);
         }
         final String expected = text;
         int before = matching(n -> !n.isEditable() && expected.contentEquals(value(n.getText()))).size();
@@ -597,12 +597,16 @@ public final class Bridge extends AccessibilityService {
         }
     }
     private static void setText(AccessibilityNodeInfo node, String text) throws Exception {
+        writeText(node, text);
+        require(node.refresh() && (text.contentEquals(value(node.getText())) ||
+            (text.isEmpty() && node.isShowingHintText())), "输入框文本未通过校验");
+    }
+
+    private static void writeText(AccessibilityNodeInfo node, String text) throws Exception {
         Bundle args = new Bundle();
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
         require(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args), "无法写入文本");
         pause();
-        require(node.refresh() && (text.contentEquals(value(node.getText())) ||
-            (text.isEmpty() && node.isShowingHintText())), "输入框文本未通过校验");
     }
 
     private static void require(boolean condition, String message) throws IOException {
