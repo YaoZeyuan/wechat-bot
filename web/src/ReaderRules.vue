@@ -248,7 +248,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
 
 <style scoped>
 .plugin-section h4 { margin: 18px 0 8px; }
-.plugin-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 255px), 1fr)); gap: 12px; }
+.plugin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, max(255px, calc((100% - 24px) / 3))), 1fr)); gap: 12px; }
 .plugin-card { border-radius: 10px; }
 .plugin-card p { color: var(--color-text-2); min-height: 2.8em; }
 
