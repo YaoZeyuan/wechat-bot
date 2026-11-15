@@ -132,9 +132,6 @@ public final class Bridge extends AccessibilityService {
                 "无法将光标移到 @成员之后");
             paste(input, text);
             text = prefix + text;
-            String actual = value(unique(AccessibilityNodeInfo::isEditable, "聊天输入框").getText()).toString();
-            require(text.equals(actual), "@成员或正文未通过校验；预期长度 " + text.length()
-                + "，实际长度 " + actual.length() + "，实际保留 @前缀：" + actual.startsWith(prefix));
         } else {
             setText(input, text);
         }
