@@ -30,14 +30,19 @@ class Settings(BaseModel):
     trial_hours: int = Field(default=1, ge=1, le=24)
     trial_limit: int = Field(default=300, ge=1, le=5000)
     trial_cooldown: int = Field(default=3, ge=1, le=60)
-    trial_intro: str = Field(default="", max_length=16000)
-    trial_summary: str = Field(default="", max_length=16000)
-    trial_judges: str = Field(default="", max_length=770)
+    trial_intro: str = Field(default=chat_trial.DEFAULT_INTRO, max_length=16000)
+    trial_summary: str = Field(default=chat_trial.DEFAULT_SUMMARY, max_length=16000)
+    trial_judges: str = Field(default="qwen3.7-flash\ndeepseek-v4.1-flash\nZHIPU/GLM-5.3-Flash", max_length=770)
     trial_clerk: str = Field(default="", max_length=256)
-    trial_prompt: str = Field(default="", max_length=16000)
+    trial_prompt: str = Field(default=chat_trial.DEFAULT_RULES, max_length=16000)
     max_chars: int = Field(default=300, gt=0)
     assistant_name: str | None = Field(default=None, max_length=80)
     intro_reply: str | None = Field(default=None, max_length=2500)
+
+    @field_validator("trial_intro", "trial_prompt", "trial_summary")
+    @classmethod
+    def default_trial_prompt(cls, value, info):
+        return value if value.strip() else cls.model_fields[info.field_name].default
 
     @field_validator("trial_judges")
     @classmethod
@@ -101,7 +106,10 @@ def config(group_id, plugin_id, legacy, data=None):
         inherited.update(assistant_name=value.get("assistant_name"), intro_reply=value.get("intro_reply"))
     if value is not None and plugin_id == chat_trial.PLUGIN_ID:
         inherited.update({field["key"]: value[field["key"]] for field in chat_trial.METADATA["fields"]
-                          if field["key"] in value})
+                          if field["key"] in value and (
+                              field["key"] not in {"trial_intro", "trial_prompt", "trial_summary"}
+                              or value[field["key"]].strip()
+                          )})
     if value is not None and plugin_id == member_review.PLUGIN_ID:
         inherited.update({key: value[key] for key in ("history_count", "max_chars") if key in value})
     if plugin_id == ACTIVITY_STATS and any(key in stored or key in legacy for key in RANKINGS):

@@ -1,3 +1,9 @@
+from pathlib import Path
+
+DEFAULT_INTRO = Path(__file__).with_name("default_intro.txt").read_text(encoding="utf-8").strip()
+DEFAULT_RULES = Path(__file__).with_name("default_rules.txt").read_text(encoding="utf-8").strip()
+DEFAULT_SUMMARY = Path(__file__).with_name("default_summary.txt").read_text(encoding="utf-8").strip()
+
 PLUGIN_ID = "chat_trial"
 METADATA = {
     "name": "审判", "description": "配置审判参数并查看本地报告，群消息触发尚未接入",

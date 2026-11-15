@@ -28,10 +28,13 @@ class Settings(BaseModel):
 def load(path=PATH) -> Settings:
     if not path.exists():
         if path == TRIAL_PATH:
-            return Settings(provider="compatible", thinking=None, timeout_seconds=300)
+            return Settings(provider="compatible", model="qwen3.7-flash", thinking="disabled", timeout_seconds=600)
         return Settings()
     try:
-        return Settings.model_validate_json(path.read_text(encoding="utf-8-sig"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        if path == TRIAL_PATH and isinstance(data, dict):
+            data = {"model": "qwen3.7-flash", "timeout_seconds": 600, **data, "thinking": "disabled"}
+        return Settings.model_validate(data)
     except (OSError, ValueError) as exc:
         raise ChatError("无法读取全局 AI 配置") from exc
 
