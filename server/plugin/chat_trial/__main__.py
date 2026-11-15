@@ -27,8 +27,8 @@ def render(text, names):
     return MARKDOWN.render(text)
 
 
-def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False):
-    original = f"【群规】\n{PROMPT}\n\n【原始发言】\n{transcript}"
+def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT):
+    original = f"【群规】\n{rules}\n\n【原始发言】\n{transcript}"
     verdict, judge, elapsed = generate(original, str(uuid4()))
     summary, clerk, summary_elapsed = generate(
         "汇总以下三位法官的裁决。用 Markdown 表格对照，保留成员代号，给出处理建议。\n\n"
@@ -79,14 +79,19 @@ if __name__ == "__main__":
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--sample", action="store_true")
     mode.add_argument("--group", metavar="群ID")
-    parser.add_argument("--hours", type=int, choices=range(1, 25), default=1, metavar="1–24")
-    parser.add_argument("--limit", type=int, choices=range(1, 5001), default=300, metavar="1–5000")
+    parser.add_argument("--hours", type=int, choices=range(1, 25), metavar="1–24")
+    parser.add_argument("--limit", type=int, choices=range(1, 5001), metavar="1–5000")
     args = parser.parse_args()
     configure_logging()
     output = Path("local-data/chat-trial-preview/index.html")
     if args.group:
-        transcript, names = read_group(args.group, args.hours, args.limit)
-        preview(output, transcript, names, real_group=True)
+        from ...reader import automation
+        from ...group_plugins import config
+        from . import PLUGIN_ID
+
+        settings = config(args.group, PLUGIN_ID, automation.group_plugins(args.group))
+        transcript, names = read_group(args.group, args.hours or settings.trial_hours, args.limit or settings.trial_limit)
+        preview(output, transcript, names, real_group=True, rules=settings.trial_prompt or PROMPT)
     elif args.sample:
         with patch(__name__ + ".generate", side_effect=[
             ("M004 对 @U01 使用辱骂，违反禁止人身攻击的群规。", "示例法官", 2),

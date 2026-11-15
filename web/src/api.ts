@@ -118,7 +118,9 @@ export interface ConversationDetails {
   remark: string
 }
 
-export interface GroupPlugin {
+type TrialSettings = { trial_hours?: number; trial_limit?: number; trial_cooldown?: number; trial_prompt?: string }
+
+export interface GroupPlugin extends TrialSettings {
   admin_ids?: string[]
   global_enabled?: boolean
   group?: string
@@ -133,7 +135,7 @@ export interface GroupPlugin {
   intro_reply?: string | null
   history_count?: number
   max_chars?: number
-  fields?: { key: 'assistant_name' | 'intro_reply' | 'history_count' | 'max_chars'; label: string; type: 'input' | 'textarea' | 'number';
+  fields?: { key: 'assistant_name' | 'intro_reply' | 'history_count' | 'max_chars' | keyof TrialSettings; max?: number; label: string; type: 'input' | 'textarea' | 'number';
     max_length: number; placeholder?: string; description?: string }[]
 }
 
@@ -252,9 +254,9 @@ export const api = {
     request<GroupPlugin[]>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins`),
   groupMembers: (groupId: string) => request<{ id: string; name: string; group_nickname: string; original_name?: string; remark?: string }[]>(
     `/reader/monitored-groups/${encodeURIComponent(groupId)}/members`),
-  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean, assistant_name?: string | null, intro_reply?: string | null, history_count?: number, max_chars?: number, admin_ids?: string[]) =>
+  saveGroupPlugin: (groupId: string, pluginId: string, enabled: boolean, assistant_name?: string | null, intro_reply?: string | null, history_count?: number, max_chars?: number, admin_ids?: string[], trial?: TrialSettings) =>
     request<GroupPlugin>(`/reader/monitored-groups/${encodeURIComponent(groupId)}/plugins/${encodeURIComponent(pluginId)}`, {
-      method: 'PUT', body: JSON.stringify({ enabled, assistant_name, intro_reply, history_count, max_chars, admin_ids }),
+      method: 'PUT', body: JSON.stringify({ enabled, assistant_name, intro_reply, history_count, max_chars, admin_ids, ...trial }),
     }),
   monitoredGroups: () => request<MonitoredGroup[]>('/reader/monitored-groups'),
   deleteMonitoredGroup: (id: string) =>

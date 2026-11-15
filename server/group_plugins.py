@@ -11,7 +11,7 @@ from .reply import MessageEvent
 from .plugin import ai_chat
 from .plugin import chat_summary
 from .ciphertalk import SourceError
-from .plugin import self_intro, member_review, group_order
+from .plugin import self_intro, member_review, group_order, chat_trial
 from time import time
 from .plugins import PLUGINS
 
@@ -20,13 +20,17 @@ LOCK = Lock()
 BEIJING = timezone(timedelta(hours=8))
 RANKINGS = {"daily_activity": "活跃日榜", "total_activity": "活跃总榜", "total_lurkers": "潜水总榜"}
 ACTIVITY_STATS = "activity_stats"
-BUILTINS = (ACTIVITY_STATS, self_intro.PLUGIN_ID, ai_chat.PLUGIN_ID, chat_summary.PLUGIN_ID, member_review.PLUGIN_ID, group_order.PLUGIN_ID)
+BUILTINS = (ACTIVITY_STATS, self_intro.PLUGIN_ID, ai_chat.PLUGIN_ID, chat_summary.PLUGIN_ID, member_review.PLUGIN_ID, group_order.PLUGIN_ID, chat_trial.PLUGIN_ID)
 
 
 class Settings(BaseModel):
     enabled: bool
     admin_ids: list[str] = Field(default_factory=list)
     history_count: int = Field(default=300, gt=0)
+    trial_hours: int = Field(default=1, ge=1, le=24)
+    trial_limit: int = Field(default=300, ge=1, le=5000)
+    trial_cooldown: int = Field(default=3, ge=1, le=60)
+    trial_prompt: str = Field(default="", max_length=16000)
     max_chars: int = Field(default=300, gt=0)
     assistant_name: str | None = Field(default=None, max_length=80)
     intro_reply: str | None = Field(default=None, max_length=2500)
@@ -83,6 +87,9 @@ def config(group_id, plugin_id, legacy, data=None):
         inherited["admin_ids"] = (value or {}).get("admin_ids", [])
     if value is not None and any(key in value for key in ("assistant_name", "intro_reply")):
         inherited.update(assistant_name=value.get("assistant_name"), intro_reply=value.get("intro_reply"))
+    if value is not None and plugin_id == chat_trial.PLUGIN_ID:
+        inherited.update({field["key"]: value[field["key"]] for field in chat_trial.METADATA["fields"]
+                          if field["key"] in value})
     if value is not None and plugin_id == member_review.PLUGIN_ID:
         inherited.update({key: value[key] for key in ("history_count", "max_chars") if key in value})
     if plugin_id == ACTIVITY_STATS and any(key in stored or key in legacy for key in RANKINGS):

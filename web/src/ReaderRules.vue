@@ -237,6 +237,8 @@ onUnmounted(() => window.clearInterval(refreshTimer))
                 :plugin="detailPlugin" @saved="updatePlugin" />
               <AiChatSettings v-if="detailPlugin.id === 'ai_chat'" :key="groupId" :group-id="groupId" />
               <SummaryPreview v-if="detailPlugin.id === 'chat_summary'" :group-id="groupId" />
+              <a v-if="detailPlugin.id === 'chat_trial'" href="/api/reader/trial-preview"
+                target="_blank" rel="noopener">打开最近生成的审判报告</a>
             </template>
           </a-modal>
         </template>
