@@ -21,7 +21,7 @@ const filtered = computed(() => {
 const active = computed(() => plugins.value.find(plugin => plugin.id === route.query.plugin) ?? filtered.value[0])
 const saving = ref(false)
 const saved = ref(false)
-const draft = ref({ global_enabled: true, enabled: false, assistant_name: '', intro_reply: '', history_count: 300, max_chars: 300, trial_hours: 1, trial_limit: 300, trial_cooldown: 3, trial_prompt: '', trial_intro: '', trial_summary: '', trial_judges: '', trial_clerk: '' })
+const draft = ref({ global_enabled: true, enabled: false, assistant_name: '', intro_reply: '', history_count: 300, max_chars: 300, trial_hours: 1, trial_limit: 300, trial_cooldown: 3, trial_prompt: '', trial_intro: '', trial_summary: '', trial_judges: '', trial_clerk: '', trial_auto_warn: false })
 watch(active, plugin => {
   draft.value = {
     global_enabled: plugin?.global_enabled ?? true,
@@ -38,6 +38,7 @@ watch(active, plugin => {
     trial_summary: plugin?.trial_summary ?? '',
     trial_judges: plugin?.trial_judges ?? '',
     trial_clerk: plugin?.trial_clerk ?? '',
+    trial_auto_warn: plugin?.trial_auto_warn ?? false,
   }
   saved.value = false
 })
@@ -140,7 +141,8 @@ function setJudge(index: number, value: string) {
         </div>
         <label v-for="field in active.fields?.filter(item => item.key !== 'trial_judges' && item.key !== 'trial_clerk')" :key="field.key" class="parameter">
               {{ field.label }}
-              <input v-if="field.key === 'history_count' || field.key === 'max_chars' || field.key === 'trial_hours' || field.key === 'trial_limit' || field.key === 'trial_cooldown'"
+              <a-switch v-if="field.key === 'trial_auto_warn'" v-model="draft.trial_auto_warn" />
+          <input v-else-if="field.key === 'history_count' || field.key === 'max_chars' || field.key === 'trial_hours' || field.key === 'trial_limit' || field.key === 'trial_cooldown'"
                 v-model.number="draft[field.key]" type="number" min="1" :max="field.max" required :disabled="saving" />
               <a-textarea v-else-if="field.type === 'textarea'" v-model="draft[field.key]" :max-length="field.max_length" :disabled="saving" />
               <a-input v-else v-model="draft[field.key]" :max-length="field.max_length" :disabled="saving" />

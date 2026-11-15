@@ -44,6 +44,7 @@ class Violation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     message_id: StrictStr
     reason: StrictStr
+    excerpts: list[StrictStr]
 
 
 class Verdict(BaseModel):
@@ -59,11 +60,11 @@ class Decision(BaseModel):
 
 
 OUTPUT_RULES = """【固定输出格式】
-仅输出 JSON 对象，例如 {"verdicts":[{"user_id":"U07","violation":true,"violations":[{"message_id":"M042","reason":"结合原文说明违反的群规"}]}]}。
+仅输出 JSON 对象，例如 {"verdicts":[{"user_id":"U07","violation":true,"violations":[{"message_id":"M042","reason":"结合原文说明违反的群规","excerpts":["法官判词中的原文摘录"]}}]}]}。
 使用原始发言里的成员和消息编号。每位成员最多出现一次，每条违规发言必须有具体原因。没有违规发言时使用空列表。只列出明确违规的成员，每项 violation 必须为 true。没有违规时返回 {"verdicts":[]}。不要输出代码围栏或额外文字。"""
 
 
-def validate_decision(text, evidence):
+def validate_decision(text, evidence, verdicts):
     decision = Decision.model_validate_json(text)
     users = set()
     findings = {}
@@ -79,15 +80,20 @@ def validate_decision(text, evidence):
                 raise ValueError("违规发言编号不存在或作者不匹配")
             if violation.message_id in findings or not violation.reason.strip():
                 raise ValueError("违规发言重复或缺少原因")
-            findings[violation.message_id] = violation.reason
+            if len(violation.excerpts) != len(verdicts) or any(
+                not excerpt.strip() or excerpt not in verdict
+                for excerpt, verdict in zip(violation.excerpts, verdicts)
+            ):
+                raise ValueError("各法官判词摘录缺失或无法核对")
+            findings[violation.message_id] = {"reason": violation.reason, "excerpts": violation.excerpts}
     return findings
 
 
 def judge_prompt(transcript, intro, rules):
-    return f"【群规】\n{intro}\n{rules}\n\n{OUTPUT_RULES}\n\n【原始发言】\n{transcript}"
+    return f"【群规】\n{intro}\n{rules}\n\n请用可读判词说明结论，并引用对应成员和消息编号。\n\n【原始发言】\n{transcript}"
 
 
-def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id='', evidence=None, progress=lambda message: None):
+def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id='', evidence=None, auto_warn=False, progress=lambda message: None):
     if evidence is None:
         evidence = {
             message_id: {"user_id": user_id, "text": text}
@@ -114,56 +120,61 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
             results = list(executor.map(lambda model: call('法官', original, model), judges))
     else:
         results = [call('法官', original)] * 3
-    findings = []
-    panels = []
-    valid = True
-    for verdict, judge, elapsed in results:
-        try:
-            items = validate_decision(verdict, evidence)
-        except ValueError as exc:
-            valid = False
-            progress(f"法官 · {judge} 裁决格式不合格 · {exc}")
-            panels.append("裁决格式不合格。")
-            continue
-        findings.append(items)
-        panels.append("\n\n".join(
-            f"{evidence[mid]['user_id']} · {mid}：{reason}" for mid, reason in items.items()
-        ) or "没有明确判定违规的发言。")
-
-    warnings = {}
-    if valid and findings:
-        for mid, row in evidence.items():
-            if all(mid in judge for judge in findings):
-                warnings.setdefault(row["user_id"], []).append({
-                    "message_id": mid, **row, "reasons": [judge[mid] for judge in findings],
-                })
-    outcome = {"complete": valid, "warnings": [
-        {"user_id": user, "violations": rows} for user, rows in warnings.items()
-    ]}
+    verdicts = [result[0] for result in results]
+    judge_text = "\n\n".join(f"法官 {i}\n{text}" for i, text in enumerate(verdicts, 1))
     summary, clerk, summary_elapsed = call(
-        '书记官',
+        "书记官",
         (summary_rules or "汇总法官裁决，用 Markdown 表格对照，保留成员代号并给出处理建议。")
-        + "\n\n以程序终审结果为准。裁决不完整时不得建议自动警告。\n"
-        + json.dumps({"complete": valid, "warnings": [
-            {"user_id": user, "violations": [
-                {key: row[key] for key in ("message_id", "text", "reasons")} for row in rows
-            ]} for user, rows in warnings.items()
-        ]}, ensure_ascii=False)
-        + "\n\n" + "\n\n".join(f"法官 {i}\n{panel}" for i, panel in enumerate(panels, 1)),
+        + "\n\n" + judge_text,
         clerk_id,
     )
+    outcome = None
+    penalty = ""
+    if auto_warn:
+        try:
+            extracted, _, _ = call(
+                "处罚书记官",
+                OUTPUT_RULES + "\n只提取每位法官均明确认定违规的同一条消息。"
+                "每条违规需提供 excerpts 数组，按法官顺序逐字引用支持这一裁决的原文片段。"
+                "\n\n" + original + "\n\n" + judge_text,
+                clerk_id,
+            )
+            findings = validate_decision(extracted, evidence, verdicts)
+            by_member = {}
+            for mid, finding in findings.items():
+                row = evidence[mid]
+                by_member.setdefault(row["user_id"], []).append({"message_id": mid, **row, **finding})
+            outcome = {"complete": True, "warnings": [
+                {"user_id": user, "violations": rows} for user, rows in by_member.items()
+            ]}
+            entries = "".join(
+                f"<h3>{escape(names.get('@' + user, user))} · 1 次警告建议</h3><ul>"
+                + "".join(f"<li><blockquote>{escape(row['text'])}</blockquote><p>{escape(row['reason'])}</p></li>"
+                          for row in rows) + "</ul>"
+                for user, rows in by_member.items()
+            )
+            penalty = entries or "<p>没有符合条件的警告建议。</p>"
+        except (ChatError, ValueError) as exc:
+            reason = " · ".join([str(exc), *getattr(exc, "__notes__", [])])
+            progress(f"处罚提取失败 · {reason}")
+            outcome = {"complete": False, "warnings": [], "error": reason}
+            penalty = f"<p>处罚提取失败 · {escape(reason)}</p>"
+        penalty = "<section><h2>处罚依据</h2>" + penalty + "</section>"
     cards = "".join(
         f"<details><summary>裁决 {i}<small>{escape(judge)} · {int(elapsed)} 秒</small></summary>"
         f"<article>{render(verdict, names)}</article></details>"
-        for i, ((_, judge, elapsed), verdict) in enumerate(zip(results, panels), 1)
+        for i, (verdict, judge, elapsed) in enumerate(results, 1)
     )
     progress('正在生成 HTML')
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(Template(Path(__file__).with_name("template.html").read_text(encoding="utf-8")).substitute(
         original=escape(restore_names(original, names)), cards=cards, clerk=escape(clerk),
-        seconds=int(summary_elapsed), summary=render(summary, names),
+        seconds=int(summary_elapsed), summary=render(summary, names), penalty=penalty,
     ), encoding="utf-8")
-    output.with_suffix(".json").write_text(json.dumps(outcome, ensure_ascii=False, indent=2), encoding="utf-8")
+    if outcome is not None:
+        output.with_suffix(".json").write_text(json.dumps(outcome, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        output.with_suffix(".json").unlink(missing_ok=True)
 
 
 def read_group(group_id, hours, limit):
@@ -219,12 +230,13 @@ if __name__ == "__main__":
         preview(output, transcript, names, real_group=True, evidence=evidence, rules=settings.trial_prompt or PROMPT,
                 intro=settings.trial_intro, summary_rules=settings.trial_summary,
                 judges=[line.strip() for line in settings.trial_judges.splitlines() if line.strip()],
-                clerk_id=settings.trial_clerk)
+                clerk_id=settings.trial_clerk, auto_warn=settings.trial_auto_warn)
     elif args.sample:
         with patch(__name__ + ".generate", side_effect=[
-            ('{"verdicts":[{"user_id":"U02","violation":true,"violations":[{"message_id":"M004","reason":"违反禁止人身攻击的群规"}]}]}' , "示例法官", 2),
+            ("U02 的 M004 是人身攻击。", "示例法官", 2),
             ("| 消息 | 裁决 | 建议 |\n| --- | --- | --- |\n| M004 | 人身攻击 | 提醒 @U02 就事论事 |", "示例书记官", 1),
+            ('{"verdicts":[{"user_id":"U02","violation":true,"violations":[{"message_id":"M004","reason":"人身攻击","excerpts":["U02 的 M004 是人身攻击。","U02 的 M004 是人身攻击。","U02 的 M004 是人身攻击。"]}]}]}', "处罚书记官", 1),
         ]):
-            preview(output)
+            preview(output, auto_warn=True)
     else:
         preview(output)

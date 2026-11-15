@@ -118,7 +118,7 @@ export interface ConversationDetails {
   remark: string
 }
 
-type TrialSettings = { trial_intro?: string; trial_summary?: string; trial_judges?: string; trial_clerk?: string; trial_hours?: number; trial_limit?: number; trial_cooldown?: number; trial_prompt?: string }
+type TrialSettings = { trial_auto_warn?: boolean; trial_intro?: string; trial_summary?: string; trial_judges?: string; trial_clerk?: string; trial_hours?: number; trial_limit?: number; trial_cooldown?: number; trial_prompt?: string }
 
 export interface GroupPlugin extends TrialSettings {
   admin_ids?: string[]
@@ -135,7 +135,7 @@ export interface GroupPlugin extends TrialSettings {
   intro_reply?: string | null
   history_count?: number
   max_chars?: number
-  fields?: { key: 'assistant_name' | 'intro_reply' | 'history_count' | 'max_chars' | keyof TrialSettings; max?: number; label: string; type: 'input' | 'textarea' | 'number';
+  fields?: { key: 'assistant_name' | 'intro_reply' | 'history_count' | 'max_chars' | keyof TrialSettings; max?: number; label: string; type: 'input' | 'textarea' | 'number' | 'switch';
     max_length: number; placeholder?: string; description?: string }[]
 }
 

@@ -15,6 +15,7 @@ METADATA = {
         {"key": "trial_intro", "label": "审判引导词", "type": "textarea", "max_length": 16000},
         {"key": "trial_summary", "label": "书记官汇总规则", "type": "textarea", "max_length": 16000},
         {"key": "trial_judges", "label": "法官模型 ID（每行一个，最多三个）", "type": "textarea", "max_length": 768},
+        {"key": "trial_auto_warn", "label": "自动警告（仅生成建议）", "type": "switch"},
         {"key": "trial_clerk", "label": "书记官模型 ID", "type": "input", "max_length": 256},
         {"key": "trial_prompt", "label": "审判规则", "type": "textarea", "max_length": 16000},
     ],

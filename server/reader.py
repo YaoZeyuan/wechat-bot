@@ -139,7 +139,7 @@ def run_trial_preview(group_id, run):
         transcript, names, evidence = read_group(group_id, settings.trial_hours, settings.trial_limit)
         preview(output, transcript, names, real_group=True, evidence=evidence, intro=settings.trial_intro, rules=settings.trial_prompt,
                 summary_rules=settings.trial_summary, judges=settings.trial_judges.splitlines(),
-                clerk_id=settings.trial_clerk, progress=progress)
+                clerk_id=settings.trial_clerk, auto_warn=settings.trial_auto_warn, progress=progress)
         progress("HTML 报告已生成")
         with trial_runs_lock:
             run.update(status="completed", url=f"/api/reader/trial-preview/{run['id']}")

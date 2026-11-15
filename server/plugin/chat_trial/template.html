@@ -37,6 +37,7 @@ button{border:1px solid #8e9197;border-radius:4px;background:white;color:var(--i
 $cards
 <section><h2>终审汇总</h2><small>$clerk · $seconds 秒</small>$summary</section>
 
+$penalty
 </main><script>
 document.querySelector('#copy').onclick = async (event) => {
   await navigator.clipboard.writeText(document.querySelector('#original').textContent);
