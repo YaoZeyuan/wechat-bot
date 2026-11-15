@@ -16,6 +16,10 @@ class ShareRejected(SendError):
     """The phone confirmed that the share was rejected before clicking Send."""
 
 
+class BridgeUnavailable(SendError):
+    """The phone bridge did not return a usable response."""
+
+
 class AccessibilitySender:
     def __init__(self, cfg, serial=None, dry_run=None):
         setup_adb(cfg)
@@ -34,7 +38,7 @@ class AccessibilitySender:
 
         self.device = adb.device(self.serial)
         self.ensure_awake_and_talkback()
-        result = self.call("status")
+        result = self.bridge_status()
         self.progress(f"已连接手机无障碍服务，前台微信可见节点 {result['nodes']} 个")
         if not result["nodes"] and "root_package" in result:
             package = result["root_package"] or "无根节点"
@@ -75,18 +79,66 @@ class AccessibilitySender:
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             active = self.foreground()
-            if active and active.group(2) == "com.tencent.mm" and self.call("status")["nodes"] > 0:
+            if active and active.group(2) == "com.tencent.mm" and self.bridge_status()["nodes"] > 0:
                 self.progress("手机已亮屏，TalkBack 正在运行，微信控件可读")
                 return
             time.sleep(0.5)
         raise SendError("手机准备未完成，请检查锁屏或挡住微信的系统弹窗")
 
+    def bridge_status(self):
+        from adbutils import AdbError
+
+        try:
+            return self.call("status")
+        except BridgeUnavailable as exc:
+            self.progress(f"手机 Sender 通道未响应，正在重试探测 · {exc}")
+        try:
+            return self.call("status")
+        except BridgeUnavailable:
+            pass
+
+        package = "local.wechatsender"
+        component = f"{package}/.Bridge"
+        key = "enabled_accessibility_services"
+        try:
+            installed = self.device.shell(["pm", "path", package], timeout=5)
+            if not any(line.startswith("package:") for line in installed.splitlines()):
+                raise SendError("手机未安装 WeChat Sender，无法恢复无障碍通道")
+            enabled = self.device.shell(["settings", "get", "secure", key], timeout=5).strip()
+            aliases = {component, f"{package}/{package}.Bridge"}
+            services = [item for item in enabled.split(":") if item not in {"", "null"}]
+            if aliases.intersection(services):
+                self.progress("手机 Sender 已启用但未响应，正在重新绑定无障碍服务")
+                self.device.shell(["settings", "put", "secure", key, ":".join(
+                    item for item in services if item not in aliases
+                )], timeout=5)
+                time.sleep(0.5)
+            else:
+                self.progress("手机 Sender 无障碍服务未启用，正在启用")
+            restored = [item for item in services if item not in aliases] + [component]
+            self.device.shell(["settings", "put", "secure", key, ":".join(restored)], timeout=5)
+        except (AdbError, OSError) as exc:
+            raise SendError(f"ADB 无法恢复手机 Sender 服务：{exc}") from exc
+
+        for attempt in range(1, 4):
+            time.sleep(0.5)
+            try:
+                result = self.call("status")
+            except BridgeUnavailable as exc:
+                self.progress(f"手机 Sender 恢复探测 {attempt}/3 未通过 · {exc}")
+            else:
+                self.progress("手机 Sender 无障碍通道已恢复，继续原任务")
+                return result
+        raise SendError("手机 Sender 无障碍通道自动恢复失败，已停止本次发送")
+
     def call(self, action, **payload):
+        from adbutils import AdbError
+
         endpoint = "localabstract:wechat_sender"
         try:
             port = self.device.forward_port(endpoint)
             with socket.create_connection(("127.0.0.1", port), timeout=3) as peer:
-                peer.settimeout(25)
+                peer.settimeout(3 if action == "status" else 25)
                 if action == "mention_text":
                     payload["mention_progress"] = True
                 request = json.dumps({"action": action, **payload}, ensure_ascii=False)
@@ -98,8 +150,8 @@ class AccessibilitySender:
                             break
                         self.progress(result["progress"])
                         peer.sendall(b"ack\n")
-        except (OSError, ValueError) as exc:
-            raise SendError("手机无障碍通道未响应，请检查手机端服务是否已启用") from exc
+        except (AdbError, OSError, ValueError) as exc:
+            raise BridgeUnavailable(f"手机无障碍通道未响应（{type(exc).__name__}）") from exc
         if not result["ok"] and not result.get("uncertain"):
             error_type = ShareRejected if action in {"share", "mention_text"} else SendError
             raise error_type(result["error"])
