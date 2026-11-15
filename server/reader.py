@@ -105,7 +105,7 @@ def preview_chat_summary(request: SummaryPreview):
 @router.get("/trial-ai")
 def get_trial_ai():
     try:
-        return global_ai.public_settings(global_ai.TRIAL_PATH)
+        return global_ai.public_settings(global_ai.TRIAL_PATH, include_api_key=True)
     except global_ai.ChatError as exc:
         raise HTTPException(502, str(exc)) from exc
 
@@ -117,7 +117,7 @@ def set_trial_ai(settings: global_ai.Settings):
         raise HTTPException(422, "模型 API 地址应为 HTTPS Base URL")
     try:
         global_ai.save(settings, global_ai.TRIAL_PATH)
-        return global_ai.public_settings(global_ai.TRIAL_PATH)
+        return global_ai.public_settings(global_ai.TRIAL_PATH, include_api_key=True)
     except (OSError, global_ai.ChatError) as exc:
         log.warning("trial_ai_save_failed", msg="审判模型配置保存失败", error_type=type(exc).__name__)
         raise HTTPException(502, "无法保存审判模型配置") from exc

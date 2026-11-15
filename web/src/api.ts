@@ -203,9 +203,9 @@ export const api = {
       }),
     },
   ),
-  trialAi: () => request<GlobalAiSettings>('/reader/trial-ai'),
+  trialAi: () => request<GlobalAiSettings & { api_key: string }>('/reader/trial-ai'),
   saveTrialAi: (settings: Omit<GlobalAiSettings, 'has_api_key'> & { api_key: string }) =>
-    request<GlobalAiSettings>('/reader/trial-ai', { method: 'PUT', body: JSON.stringify(settings) }),
+    request<GlobalAiSettings & { api_key: string }>('/reader/trial-ai', { method: 'PUT', body: JSON.stringify(settings) }),
   globalAi: () => request<GlobalAiSettings>('/reader/global-ai'),
   saveGlobalAi: (settings: Omit<GlobalAiSettings, 'has_api_key'> & { api_key: string }) =>
     request<GlobalAiSettings>('/reader/global-ai', { method: 'PUT', body: JSON.stringify(settings) }),

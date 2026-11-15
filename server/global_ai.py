@@ -49,10 +49,11 @@ def save(settings: Settings, path=PATH):
         pending.replace(path)
 
 
-def public_settings(path=PATH) -> dict:
+def public_settings(path=PATH, *, include_api_key=False) -> dict:
     settings = load(path)
     return {**settings.model_dump(mode="json", exclude={"api_key"}),
-            "has_api_key": bool(settings.api_key.get_secret_value())}
+            "has_api_key": bool(settings.api_key.get_secret_value()),
+            **({"api_key": settings.api_key.get_secret_value()} if include_api_key else {})}
 
 
 def summarize(transcript: str, request_id: str) -> str:
