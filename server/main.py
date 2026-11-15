@@ -463,6 +463,10 @@ def restart_adb() -> dict[str, bool]:
                         text=True, encoding="utf-8", errors="replace", timeout=10,
                     )
                 except (OSError, subprocess.SubprocessError) as exc:
+                    if command == "kill-server" and isinstance(exc, subprocess.CalledProcessError):
+                        sender_log.warning("adb_stop_unconfirmed", msg="ADB 停止未确认，继续尝试启动",
+                                           returncode=exc.returncode, stderr=exc.stderr)
+                        continue
                     sender_log.warning("adb_restart_failed", msg="ADB 重启失败",
                                        command=command, error=str(exc), stderr=getattr(exc, "stderr", None))
                     raise HTTPException(503, f"ADB 重启失败（{command}），请查看 Server 日志") from exc
