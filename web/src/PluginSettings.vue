@@ -113,7 +113,7 @@ function setJudge(index: number, value: string) {
       </div>
       <a-alert v-if="error" type="error">{{ error }}</a-alert>
       <div class="actions">
-        <a-button v-if="trial" :disabled="dirty || busy" :loading="generatingReport" @click="generateReport">生成示例报告</a-button>
+        <a-button v-if="trial" :disabled="dirty || busy" :loading="generatingReport" @click="generateReport">执行审判并生成 HTML</a-button>
         <a v-if="trial && reportUrl" :href="reportUrl" target="_blank" rel="noopener">打开 HTML</a>
         <span role="status">{{ dirty ? '有未保存的更改' : feedback }}</span>
         <a-button :disabled="!dirty || busy" @click="reset">还原更改</a-button>
