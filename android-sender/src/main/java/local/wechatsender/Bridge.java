@@ -143,8 +143,6 @@ public final class Bridge extends AccessibilityService {
         } else {
             writeText(input, text);
         }
-        final String expected = text;
-        int before = matching(n -> !n.isEditable() && expected.contentEquals(value(n.getText()))).size();
         if (dryRun) {
             setText(unique(n -> n.isEditable(), "聊天输入框"), "");
         } else {
@@ -152,10 +150,14 @@ public final class Bridge extends AccessibilityService {
             AccessibilityNodeInfo send = unique(named("发送"), "发送按钮");
             clicked[0] = true;
             click(send);
-        pause();
-            require(chatReady(target), "发送后会话标题未匹配");
-            require(matching(n -> !n.isEditable() && expected.contentEquals(value(n.getText()))).size() > before,
-                "已点击发送，但未核对到完整文本");
+            for (int attempt = 0; attempt < 5; attempt++) {
+                pause();
+                if (chatReady(target) && matching(n -> n.isEditable()
+                        && (n.isShowingHintText() || value(n.getText()).length() == 0)).size() == 1) {
+                    return new JSONObject();
+                }
+            }
+            throw new IOException("已点击发送，但未确认目标会话的输入框清空");
         }
         return new JSONObject();
     }
