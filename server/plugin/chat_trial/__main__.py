@@ -28,8 +28,12 @@ def render(text, names):
     return MARKDOWN.render(text)
 
 
+def judge_prompt(transcript, intro, rules):
+    return f"【群规】\n{intro}\n{rules}\n\n【原始发言】\n{transcript}"
+
+
 def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rules=PROMPT, intro='', summary_rules='', judges=(), clerk_id=''):
-    original = f"【群规】\n{intro}\n{rules}\n\n【原始发言】\n{transcript}"
+    original = judge_prompt(transcript, intro, rules)
     if len(judges) > 3:
         raise ValueError("法官模型最多配置三个")
     if judges:

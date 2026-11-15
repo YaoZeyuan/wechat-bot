@@ -33,7 +33,7 @@ class Settings(BaseModel):
     trial_intro: str = Field(default=chat_trial.DEFAULT_INTRO, max_length=16000)
     trial_summary: str = Field(default=chat_trial.DEFAULT_SUMMARY, max_length=16000)
     trial_judges: str = Field(default="qwen3.7-flash\ndeepseek-v4.1-flash\nZHIPU/GLM-5.3-Flash", max_length=770)
-    trial_clerk: str = Field(default="", max_length=256)
+    trial_clerk: str = Field(default="qwen3.7-flash", max_length=256)
     trial_prompt: str = Field(default=chat_trial.DEFAULT_RULES, max_length=16000)
     max_chars: int = Field(default=300, gt=0)
     assistant_name: str | None = Field(default=None, max_length=80)

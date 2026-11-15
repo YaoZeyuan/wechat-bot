@@ -20,9 +20,25 @@ const fields = computed(() => (props.plugin.fields ?? []).filter(field =>
 const busy = ref(false)
 const feedback = ref('')
 const error = ref('')
+const requestPreview = ref('')
+const loadingPreview = ref(false)
+
+async function showRequestPreview() {
+  loadingPreview.value = true
+  error.value = ''
+  requestPreview.value = ''
+  try {
+    requestPreview.value = JSON.stringify(await api.trialRequestPreview(props.groupId), null, 2)
+  } catch (cause) {
+    error.value = (cause as Error).message
+  } finally {
+    loadingPreview.value = false
+  }
+}
 const dirty = computed(() => (props.plugin.fields ?? []).some(field => (draft.value[field.key] ?? '') !== (props.plugin[field.key] ?? '')))
 
 function reset() {
+  requestPreview.value = ''
   draft.value = { ...props.plugin }
   feedback.value = ''
   error.value = ''
@@ -60,6 +76,11 @@ function setJudge(index: number, value: string) {
         <a-tab-pane v-for="item in tabs" :key="item.id" :title="item.label" />
       </a-tabs>
       <p v-if="trial && tab === 'models'">接口地址和 API Key 在「插件管理 → 审判」统一配置。模型 ID 留空时使用默认模型。</p>
+      <div v-if="trial && tab === 'preview'">
+        <a-button :disabled="dirty" :loading="loadingPreview" @click="showRequestPreview">查看模型请求</a-button>
+        <p>使用已保存配置与固定示例聊天。书记官正文会在法官返回后拼接。</p>
+        <pre v-if="requestPreview" class="request-preview">{{ requestPreview }}</pre>
+      </div>
       <p v-if="trial && tab === 'preview'">
         <a href="/api/reader/trial-preview" target="_blank" rel="noopener">打开最近生成的审判报告</a>
         <br />保存后运行下方命令，使用本群消息重新生成报告。
@@ -94,6 +115,7 @@ function setJudge(index: number, value: string) {
 </template>
 
 <style scoped>
+.request-preview { max-height: 38vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; background: white; }
 .judge-slots { display: grid; gap: 12px; margin: 12px 0; }
 .judge-slots label { display: grid; gap: 6px; }
 .plugin-settings { background: var(--color-fill-1); border-radius: 12px; }

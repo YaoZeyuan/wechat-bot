@@ -203,6 +203,8 @@ export const api = {
       }),
     },
   ),
+  trialRequestPreview: (groupId: string) =>
+    request<Record<string, unknown>>(`/reader/trial-request-preview?group_id=${encodeURIComponent(groupId)}`),
   trialAi: () => request<GlobalAiSettings & { api_key: string }>('/reader/trial-ai'),
   saveTrialAi: (settings: Omit<GlobalAiSettings, 'has_api_key'> & { api_key: string }) =>
     request<GlobalAiSettings & { api_key: string }>('/reader/trial-ai', { method: 'PUT', body: JSON.stringify(settings) }),
