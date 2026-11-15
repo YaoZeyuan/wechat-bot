@@ -25,12 +25,15 @@ button{border:1px solid #8e9197;border-radius:4px;background:white;color:var(--i
 :focus-visible{outline:2px solid #555960;outline-offset:3px}
 @media(max-width:760px){main{width:calc(100% - 24px)}}
 @media(max-width:480px){summary small{display:block;margin-left:18px}td,th{padding:7px}section{margin-top:24px}}
+.original-panel{position:relative}
+.original-panel summary{padding-right:132px;min-height:48px}
+.original-panel button{position:absolute;right:0;top:6px;z-index:1}
 </style>
 <main><header><h1>群聊审判</h1></header>
 
-<details><summary>审判原始内容</summary><article>
-<button type="button" id="copy">复制原始内容</button><pre id="original">$original</pre>
-</article></details>
+<div class="original-panel"><button type="button" id="copy">复制原始内容</button>
+<details><summary>审判原始内容</summary><article><pre id="original">$original</pre>
+</article></details></div>
 $cards
 <section><h2>终审汇总</h2><small>$clerk · $seconds 秒</small>$summary</section>
 

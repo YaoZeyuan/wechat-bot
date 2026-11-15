@@ -23,9 +23,19 @@ PROMPT = "根据上下文判断发言是否违反就事论事、谁主张谁举�
 MARKDOWN = MarkdownIt("commonmark", {"html": False}).enable("table").disable("image")
 
 
+def restore_names(text, names):
+    def replace(match):
+        token = match[0]
+        name = names.get("@" + token.lstrip("@").upper())
+        if name is None:
+            return token
+        return ("@" if token.startswith("@") else "") + name
+
+    return re.sub(r"(?<![A-Za-z0-9_])@?U[0-9]+(?![A-Za-z0-9_])", replace, text, flags=re.I)
+
+
 def render(text, names):
-    text = re.sub(r"@U[0-9]+", lambda match: names.get(match[0], match[0]), text)
-    return MARKDOWN.render(text)
+    return MARKDOWN.render(restore_names(text, names))
 
 
 def judge_prompt(transcript, intro, rules):
@@ -68,7 +78,7 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
     progress('正在生成 HTML')
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(Template(Path(__file__).with_name("template.html").read_text(encoding="utf-8")).substitute(
-        original=escape(original), cards=cards, clerk=escape(clerk),
+        original=escape(restore_names(original, names)), cards=cards, clerk=escape(clerk),
         seconds=int(summary_elapsed), summary=render(summary, names),
     ), encoding="utf-8")
 
