@@ -192,13 +192,16 @@ def completion_payload(provider_id, model, prompt, system_prompt):
 
 
 def complete(provider: Provider, model: Model, provider_id: str, prompt: str, system_prompt: str,
-             *, request_id: str | None = None, log_bodies: bool = True, on_request=None) -> tuple[str, float]:
+             *, request_id: str | None = None, log_bodies: bool = True, on_request=None,
+             response_format: dict[str, str] | None = None) -> tuple[str, float]:
     key = provider.api_key.get_secret_value().strip()
     if not key or not model.id.strip():
         raise ChatError("请先在本地配置 API Key 和模型 ID")
     if provider.base_url.scheme != "https" or provider.base_url.username or provider.base_url.password or provider.base_url.query or provider.base_url.fragment:
         raise ChatError("模型 API 地址应为 HTTPS Base URL")
     payload = completion_payload(provider_id, model, prompt, system_prompt)
+    if response_format is not None:
+        payload["response_format"] = response_format
     body = json.dumps(payload, ensure_ascii=False)
     endpoint = str(provider.base_url).rstrip("/") + "/chat/completions"
     request = Request(

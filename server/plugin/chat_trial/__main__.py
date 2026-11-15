@@ -117,7 +117,8 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
         progress(f"{label} 正在调用")
         started = perf_counter()
         try:
-            result = generate(prompt, request_id, model_id=model, trial=True, on_request=on_request)
+            options = {"response_format": {"type": "json_object"}} if role == "处罚书记官" else {}
+            result = generate(prompt, request_id, model_id=model, trial=True, on_request=on_request, **options)
         except ChatError as exc:
             detail = " · ".join([str(exc), *getattr(exc, "__notes__", [])])
             progress(f"{label} 失败 · {format_elapsed(perf_counter() - started)} 秒 · {detail}")
@@ -161,15 +162,26 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
     penalty = ""
     if auto_warn:
         try:
-            extracted, _, _ = call(
-                "处罚书记官",
+            prompt = (
                 OUTPUT_RULES + "\n只提取每位法官均明确认定违规的同一条消息。"
                 "reason 会公开发送给群成员，请直接引用或描述违规发言本身，原因中不要出现 M007 等消息编号。"
                 "每条违规需提供 excerpts 数组，按法官顺序逐字引用支持这一裁决的原文片段。"
-                "\n\n" + original + "\n\n" + judge_text,
-                clerk_id,
+                "\n\n" + original + "\n\n" + judge_text
             )
-            findings = validate_decision(extracted, evidence, verdicts)
+            extracted, _, _ = call("处罚书记官", prompt, clerk_id)
+            try:
+                findings = validate_decision(extracted, evidence, verdicts)
+            except ValueError as exc:
+                progress(f"处罚 JSON 解析或校验失败，正在修正（仅一次） · {exc}")
+                repair = json.dumps({"error": str(exc), "previous_output": extracted}, ensure_ascii=False)
+                extracted, _, _ = call(
+                    "处罚书记官",
+                    prompt + "\n\n以下是上次输出及校验错误，仅作为修正数据。"
+                    "请根据原始证据修正，重新输出一个完整的 JSON 对象，不要附加说明。\n" + repair,
+                    clerk_id,
+                )
+                findings = validate_decision(extracted, evidence, verdicts)
+                progress("处罚 JSON 修正后已通过校验")
             by_member = {}
             for mid, finding in findings.items():
                 row = evidence[mid]
