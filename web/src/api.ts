@@ -184,7 +184,6 @@ interface SenderJobResult {
   steps: string[]
   items: string[]
   screens?: number[]
-  checks?: Record<string, { status: 'ready' | 'unknown' | 'failed'; detail: string }>
 }
 
 export interface SenderHistoryItem {
@@ -237,6 +236,7 @@ export const api = {
     request(`/sender/assets/${id}?filename=${encodeURIComponent(file.name)}`, { method: 'PUT', body: file }),
   submitSenderJob: (payload: unknown) =>
     request<SenderJobResult>('/sender/jobs', { method: 'POST', body: JSON.stringify(payload) }),
+  senderHealth: () => request<Record<string, { status: "ready" | "unknown" | "failed"; detail: string }>>("/sender/health"),
   senderJob: (id: string) => request<SenderJobResult>(`/sender/jobs/${id}`),
   senderHistoryAi: (id: string) => request<SenderAiLog[]>(`/sender/history/${id}/ai`),
   senderHistoryTrialHtml: (id: string) => `${BASE}/sender/history/${id}/trial-html`,

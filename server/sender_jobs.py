@@ -14,6 +14,14 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 router = APIRouter(prefix="/api/sender")
+DEPENDENCIES = ("adb", "sender", "screen", "talkback", "bridge", "wechat")
+dependency_health = {name: {"status": "ready", "detail": ""} for name in DEPENDENCIES}
+
+
+@router.get("/health")
+def sender_health():
+    return dependency_health.copy()
+
 root = Path(__file__).resolve().parents[1] / "local-data" / "sender"
 MAX_ASSET = 20 * 1024 * 1024
 HISTORY_LIMIT = 100
@@ -385,8 +393,12 @@ def run(job, result, *, continues=False):
     serial = None
 
     def check(name, status, detail=""):
-        result["checks"][name] = {"status": status, "detail": detail}
-        save(key, result)
+        if name not in dependency_health or status == "unknown":
+            return
+        state = {"status": status, "detail": detail}
+        if dependency_health[name] == state:
+            return
+        dependency_health[name] = state
         sender_log.info("sender_preflight", request_id=key, dependency=name,
                         status=status, detail=detail, msg="Sender 前置检查")
 
@@ -417,14 +429,11 @@ def run(job, result, *, continues=False):
         index = None
         sending = False
         phone = None
+        pending_check = None
         try:
             result["status"] = "running"
-            result["checks"] = {}
-            pending_check = "target"
             progress("检查任务附件和手机连接")
             target = resolve_target(job.target)
-            check("target", "ready")
-            pending_check = "assets"
             if job.target.kind == "group":
                 progress(f"电脑端已核对群 ID 和唯一显示名「{target}」")
             assets = {}
@@ -437,7 +446,6 @@ def run(job, result, *, continues=False):
                     metadata = files[0].with_name("filename.json")
                     filename = json.loads(metadata.read_text(encoding="utf-8")) if metadata.exists() else files[0].name
                     assets[item.asset_id] = (files[0], filename)
-            check("assets", "ready", "" if assets else "此任务无需附件")
             pending_check = "adb"
             for attempt in range(3):
                 ready = [item for item in _devices() if item["state"] == "device"]

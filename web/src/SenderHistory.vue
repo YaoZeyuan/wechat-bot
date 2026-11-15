@@ -6,8 +6,12 @@ const records = ref<SenderHistoryItem[]>([])
 const selected = ref<SenderHistoryItem>()
 const detail = ref<Awaited<ReturnType<typeof api.senderJob>>>()
 const dependencies = {
-  target: '目标会话', assets: '任务附件', adb: 'ADB 手机连接', sender: 'Sender 初始化',
+  adb: 'ADB 手机连接', sender: 'Sender 初始化',
   screen: '手机屏幕', talkback: 'TalkBack', bridge: 'Sender 无障碍通道', wechat: '微信控件',
+}
+const health = ref<Awaited<ReturnType<typeof api.senderHealth>>>()
+async function loadHealth() {
+  try { health.value = await api.senderHealth() } catch { health.value = undefined }
 }
 const checkStates = { ready: '🟢 就绪', unknown: '⚪ 未确认', failed: '🔴 失败' }
 const aiLogs = ref<SenderAiLog[]>()
@@ -93,10 +97,11 @@ async function retry() {
   }
 }
 
-onMounted(() => void load(0))
+onMounted(() => { void load(0); void loadHealth() })
 let progressTimer: number | undefined
 onMounted(() => {
   progressTimer = window.setInterval(async () => {
+    void loadHealth()
     const id = selected.value?.id
     if (!id || selected.value?.source !== 'chat_trial' || detail.value?.status !== 'running') return
     try {
@@ -119,6 +124,18 @@ onUnmounted(() => window.clearInterval(progressTimer))
     <h1>Sender 日志</h1>
     <p class="hint">保留最近 100 条任务。点击任务查看操作步骤和当时的手机画面。</p>
     <a-alert v-if="error" type="error">{{ error }}</a-alert>
+        <section class="card preflight">
+          <h3>Sender 运行环境</h3>
+          <p class="hint">默认就绪。发送任务发现异常时更新，恢复后重新标为就绪。</p>
+          <dl>
+            <div v-for="(label, name) in dependencies" :key="name">
+              <dt>{{ label }}</dt>
+              <dd>{{ checkStates[health?.[name]?.status ?? 'unknown'] }}
+                <small v-if="health?.[name]?.detail">{{ health?.[name]?.detail }}</small>
+              </dd>
+            </div>
+          </dl>
+        </section>
     <div class="grid">
       <section class="card">
         <div class="row">
@@ -157,18 +174,7 @@ onUnmounted(() => window.clearInterval(progressTimer))
         <a-button v-if="selected && detail && (selected.source !== 'chat_trial' || (detail.trial_resumable && detail.status === 'failed'))" :disabled="busy || retrying || ['queued', 'running'].includes(detail.status)"
           @click="retryTarget = selected">{{ selected.source === 'chat_trial' ? '续跑审判' : '重试任务' }}</a-button>
         <p v-if="!selected">请先选择一条任务。</p>
-        <section v-if="selected && detail" class="preflight">
-          <h3>前置依赖</h3>
-          <p v-if="!detail.checks">此任务没有前置检查记录。</p>
-          <dl>
-            <div v-for="(label, name) in dependencies" :key="name">
-              <dt>{{ label }}</dt>
-              <dd>{{ checkStates[detail.checks?.[name]?.status ?? 'unknown'] }}
-                <small v-if="detail.checks?.[name]?.detail">{{ detail.checks[name]?.detail }}</small>
-              </dd>
-            </div>
-          </dl>
-        </section>
+
         <section v-if="selected && ['ai_chat', 'chat_summary', 'member_review', 'chat_trial'].includes(selected.source)">
           <h3>模型调用</h3>
           <p v-if="aiError">{{ aiError }}</p>
