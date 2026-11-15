@@ -33,9 +33,7 @@ def load(path=PATH) -> Settings:
     try:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
         if path == TRIAL_PATH and isinstance(data, dict):
-            data = {"model": "qwen3.7-flash", "timeout_seconds": 600, "thinking": None, **data}
-            if data["thinking"] != "disabled":
-                data["thinking"] = None
+            data = {"model": "qwen3.7-flash", "timeout_seconds": 600, **data, "thinking": None}
         return Settings.model_validate(data)
     except (OSError, ValueError) as exc:
         raise ChatError("无法读取全局 AI 配置") from exc
