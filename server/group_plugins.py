@@ -28,8 +28,6 @@ class Settings(BaseModel):
     admin_ids: list[str] = Field(default_factory=list)
     history_count: int = Field(default=300, gt=0)
     max_chars: int = Field(default=300, gt=0)
-    praise_prefix: str = Field(default="你是一个观察细致、说话真诚的群友。", max_length=2000)
-    critique_prefix: str = Field(default="你是一位老练、狡诈、洞察人心的脱口秀演员，在群里冷峻观察着群聊。", max_length=2000)
     assistant_name: str | None = Field(default=None, max_length=80)
     intro_reply: str | None = Field(default=None, max_length=2500)
 
@@ -86,7 +84,7 @@ def config(group_id, plugin_id, legacy, data=None):
     if value is not None and any(key in value for key in ("assistant_name", "intro_reply")):
         inherited.update(assistant_name=value.get("assistant_name"), intro_reply=value.get("intro_reply"))
     if value is not None and plugin_id == member_review.PLUGIN_ID:
-        inherited.update({key: value[key] for key in ("history_count", "max_chars", "praise_prefix", "critique_prefix") if key in value})
+        inherited.update({key: value[key] for key in ("history_count", "max_chars") if key in value})
     if plugin_id == ACTIVITY_STATS and any(key in stored or key in legacy for key in RANKINGS):
         inherited["enabled"] = any(stored.get(key, {}).get("enabled", legacy.get(key, False)) for key in RANKINGS)
     inherited["enabled"] = (value or {}).get("enabled", legacy.get(plugin_id, inherited["enabled"]))
