@@ -211,7 +211,7 @@ def complete(provider: Provider, model: Model, provider_id: str, prompt: str, sy
     from shlex import quote
 
     curl = (
-        f'curl -X POST {quote(endpoint)} -H "Authorization: Bearer $MODEL_API_KEY" '
+        f"curl -X POST {quote(endpoint)} -H {quote('Authorization: Bearer ' + key)} "
         f"-H 'Content-Type: application/json' --data-binary {quote(body)}"
     )
     context.info("ai_chat_request", msg="正在请求模型", method="POST", url=endpoint,

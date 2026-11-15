@@ -56,8 +56,8 @@ onMounted(load)
       <label>{{ trial ? '审判默认模型 ID' : '模型 ID' }} <input v-model.trim="settings.model" required /></label>
       <label>API Key <input v-model="apiKey" :type="trial ? 'text' : 'password'" autocomplete="new-password" spellcheck="false"
         :required="!settings.has_api_key" :placeholder="settings.has_api_key ? '已配置，留空保留' : ''" /></label>
-      <label v-if="!trial">深度思考
-        <select v-model="settings.thinking"><option value="disabled">关闭</option><option value="enabled">开启</option><option :value="null">服务商默认</option></select>
+      <label>深度思考
+        <select v-model="settings.thinking"><option value="disabled">关闭</option><option v-if="!trial" value="enabled">开启</option><option :value="null">{{ trial ? '默认' : '服务商默认' }}</option></select>
       </label>
       <label>超时（秒） <input v-model.number="settings.timeout_seconds" type="number" min="1" max="600" required /></label>
       <label v-if="!trial" class="prompt">群聊梳理提示词 <textarea v-model="settings.summary_prompt" rows="14" maxlength="16000" required /></label>
