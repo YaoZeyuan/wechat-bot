@@ -161,7 +161,9 @@ public final class Bridge extends AccessibilityService {
         String before = input.isShowingHintText() ? "" : value(input.getText()).toString();
         click(input);
         paste(input, "@");
-        if (matching(named("选择提醒的人")).isEmpty()) {
+        for (int attempt = 0; attempt < 3 && mentionSearchFields().isEmpty()
+                && matching(named("选择提醒的人")).isEmpty(); attempt++) pause();
+        if (mentionSearchFields().isEmpty() && matching(named("选择提醒的人")).isEmpty()) {
             throw new IOException("微信未打开 @成员选择器；目标成员：" + nickname
                 + "；微信可见节点数：" + nodes().size() + "；页面控件：" + pageShape(target));
         }
@@ -184,13 +186,20 @@ public final class Bridge extends AccessibilityService {
     }
 
     private List<AccessibilityNodeInfo> mentionRows(String name) throws Exception {
-        setText(unique(AccessibilityNodeInfo::isEditable, "@成员搜索框"), name);
+        List<AccessibilityNodeInfo> fields = mentionSearchFields();
+        AccessibilityNodeInfo search = fields.size() == 1 ? fields.get(0)
+            : unique(AccessibilityNodeInfo::isEditable, "@成员搜索框");
+        setText(search, name);
         Set<AccessibilityNodeInfo> rows = new LinkedHashSet<>();
         for (AccessibilityNodeInfo node : matching(n -> !n.isEditable() && named(name).test(n))) {
             AccessibilityNodeInfo row = clickable(node);
             if (row != null && !row.isEditable()) rows.add(row);
         }
         return new ArrayList<>(rows);
+    }
+
+    private List<AccessibilityNodeInfo> mentionSearchFields() {
+        return matching(n -> n.isEditable() && "com.tencent.mm:id/k13".equals(n.getViewIdResourceName()));
     }
 
     private static boolean containsLabel(AccessibilityNodeInfo node, String label) {
