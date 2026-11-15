@@ -4,6 +4,7 @@ import OrderAdmins from './OrderAdmins.vue'
 import PluginSettings from './PluginSettings.vue'
 import AiChatSettings from './AiChatSettings.vue'
 import SummaryPreview from './SummaryPreview.vue'
+import RobotAccount from './RobotAccount.vue'
 import GlobalAiConfig from './GlobalAiConfig.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -152,6 +153,7 @@ onUnmounted(() => window.clearInterval(refreshTimer))
     <a-alert v-if="error" type="error">{{ error }}</a-alert>
     <a-alert v-if="notice" type="success">{{ notice }}</a-alert>
 
+    <RobotAccount v-if="!isGroupPage" />
     <GlobalAiConfig v-if="!isGroupPage" />
     <section v-if="!isGroupPage" class="card" aria-labelledby="global-heading">
       <div class="card-head">

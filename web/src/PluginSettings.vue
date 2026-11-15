@@ -9,7 +9,7 @@ const draft = ref({ ...props.plugin })
 const trial = computed(() => props.plugin.id === 'chat_trial')
 const tab = ref('models')
 const tabs = [
-  { id: 'models', label: '参数与模型', fields: ['trial_hours', 'trial_limit', 'trial_cooldown', 'trial_judges', 'trial_clerk', 'trial_auto_warn'] },
+  { id: 'models', label: '参数与模型', fields: ['trial_hours', 'trial_limit', 'trial_cooldown', 'trial_judges', 'trial_clerk', 'trial_auto_warn', 'trial_warning_hours'] },
   { id: 'prompts', label: '提示词', fields: ['trial_intro', 'trial_prompt', 'trial_summary'] },
 ]
 const fields = computed(() => (props.plugin.fields ?? []).filter(field =>
@@ -76,7 +76,7 @@ async function save() {
   error.value = ''
   try {
     const plugin = await api.saveGroupPlugin(props.groupId, draft.value.id, draft.value.enabled,
-      draft.value.assistant_name, draft.value.intro_reply, draft.value.history_count, draft.value.max_chars, undefined, {trial_hours: draft.value.trial_hours, trial_limit: draft.value.trial_limit, trial_cooldown: draft.value.trial_cooldown, trial_prompt: draft.value.trial_prompt, trial_intro: draft.value.trial_intro, trial_summary: draft.value.trial_summary, trial_judges: draft.value.trial_judges, trial_clerk: draft.value.trial_clerk, trial_auto_warn: draft.value.trial_auto_warn})
+      draft.value.assistant_name, draft.value.intro_reply, draft.value.history_count, draft.value.max_chars, undefined, {trial_hours: draft.value.trial_hours, trial_limit: draft.value.trial_limit, trial_cooldown: draft.value.trial_cooldown, trial_prompt: draft.value.trial_prompt, trial_intro: draft.value.trial_intro, trial_summary: draft.value.trial_summary, trial_judges: draft.value.trial_judges, trial_clerk: draft.value.trial_clerk, trial_auto_warn: draft.value.trial_auto_warn, trial_warning_hours: draft.value.trial_warning_hours})
     emit('saved', plugin)
     await Promise.resolve()
     feedback.value = '配置已保存'
@@ -114,7 +114,7 @@ function setJudge(index: number, value: string) {
         <div v-for="field in fields?.filter(item => item.key !== 'trial_judges' && item.key !== 'trial_clerk')" :key="field.key" class="settings-row field">
         <label :for="`plugin-${field.key}`">{{ field.label }}<small v-if="field.description">{{ field.description }}</small></label>
         <a-switch v-if="field.key === 'trial_auto_warn'" v-model="draft.trial_auto_warn" />
-          <input v-else-if="field.key === 'history_count' || field.key === 'max_chars' || field.key === 'trial_hours' || field.key === 'trial_limit' || field.key === 'trial_cooldown'"
+          <input v-else-if="field.key === 'history_count' || field.key === 'max_chars' || field.key === 'trial_hours' || field.key === 'trial_limit' || field.key === 'trial_cooldown' || field.key === 'trial_warning_hours'"
           :id="`plugin-${field.key}`" v-model.number="draft[field.key]" type="number" min="1" :max="field.max" required :disabled="busy" />
         <a-textarea v-else-if="field.type === 'textarea'" :id="`plugin-${field.key}`" :model-value="draft[field.key] ?? ''"
           :max-length="field.max_length" :auto-size="{ minRows: 3, maxRows: 9 }" :disabled="busy"

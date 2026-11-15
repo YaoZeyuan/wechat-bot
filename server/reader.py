@@ -189,6 +189,21 @@ def set_trial_ai(settings: global_ai.Settings):
         raise HTTPException(502, "无法保存审判模型配置") from exc
 
 
+class RobotSettings(BaseModel):
+    wxid: str = Field(default="", max_length=256)
+
+
+@router.get("/robot-account")
+def get_robot_account():
+    return {"wxid": builtin_plugins.robot_wxid()}
+
+
+@router.put("/robot-account")
+def set_robot_account(settings: RobotSettings):
+    builtin_plugins.save_robot_wxid(settings.wxid)
+    return get_robot_account()
+
+
 @router.get("/global-ai")
 def get_global_ai():
     try:

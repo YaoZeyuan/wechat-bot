@@ -175,17 +175,21 @@ def preview(output, transcript=TRANSCRIPT, names=NAMES, *, real_group=False, rul
         output.with_suffix(".json").write_text(json.dumps(outcome, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
         output.with_suffix(".json").unlink(missing_ok=True)
+    return outcome
 
 
-def read_group(group_id, hours, limit):
+def read_group(group_id, hours, limit, *, before=None):
     from ...reader import history_source
 
     source = history_source()
-    now = int(time())
-    with closing(source.iter_messages(group_id, limit=limit, time_range=(now - hours * 3600, now + 1))) as messages:
+    now = int(time()) if before is None else before.timestamp_ms // 1000
+    with closing(source.iter_messages(group_id, limit=limit if before is None else -1, time_range=(now - hours * 3600, now + 1))) as messages:
         from itertools import islice
 
-        rows = list(islice(messages, limit))
+        rows = list(islice((row for row in messages if before is None or (
+            row["timestampMs"] < before.timestamp_ms
+            and not before.message_id.endswith(":" + row["messageId"])
+        )), limit))
     if not rows:
         raise ValueError("指定范围内没有群聊记录")
     rows.reverse()

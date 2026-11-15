@@ -118,7 +118,7 @@ export interface ConversationDetails {
   remark: string
 }
 
-type TrialSettings = { trial_auto_warn?: boolean; trial_intro?: string; trial_summary?: string; trial_judges?: string; trial_clerk?: string; trial_hours?: number; trial_limit?: number; trial_cooldown?: number; trial_prompt?: string }
+type TrialSettings = { trial_warning_hours?: number; trial_auto_warn?: boolean; trial_intro?: string; trial_summary?: string; trial_judges?: string; trial_clerk?: string; trial_hours?: number; trial_limit?: number; trial_cooldown?: number; trial_prompt?: string }
 
 export interface GroupPlugin extends TrialSettings {
   admin_ids?: string[]
@@ -212,6 +212,10 @@ export const api = {
   trialAi: () => request<GlobalAiSettings & { api_key: string }>('/reader/trial-ai'),
   saveTrialAi: (settings: Omit<GlobalAiSettings, 'has_api_key'> & { api_key: string }) =>
     request<GlobalAiSettings & { api_key: string }>('/reader/trial-ai', { method: 'PUT', body: JSON.stringify(settings) }),
+  robotAccount: () => request<{ wxid: string }>('/reader/robot-account'),
+  saveRobotAccount: (wxid: string) => request<{ wxid: string }>('/reader/robot-account', {
+    method: 'PUT', body: JSON.stringify({ wxid }),
+  }),
   globalAi: () => request<GlobalAiSettings>('/reader/global-ai'),
   saveGlobalAi: (settings: Omit<GlobalAiSettings, 'has_api_key'> & { api_key: string }) =>
     request<GlobalAiSettings>('/reader/global-ai', { method: 'PUT', body: JSON.stringify(settings) }),

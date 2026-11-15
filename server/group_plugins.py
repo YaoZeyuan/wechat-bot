@@ -33,6 +33,7 @@ class Settings(BaseModel):
     trial_intro: str = Field(default=chat_trial.DEFAULT_INTRO, max_length=16000)
     trial_summary: str = Field(default=chat_trial.DEFAULT_SUMMARY, max_length=16000)
     trial_judges: str = Field(default="qwen3.7-flash\ndeepseek-v4.1-flash\nqwen3.8-27b", max_length=770)
+    trial_warning_hours: int = Field(default=24, ge=1)
     trial_auto_warn: bool = False
     trial_clerk: str = Field(default="qwen3.7-flash", max_length=256)
     trial_prompt: str = Field(default=chat_trial.DEFAULT_RULES, max_length=16000)
@@ -85,6 +86,18 @@ def save_ai_route(group_id, route_id, patch):
     with LOCK:
         data = read_all()
         data.setdefault(group_id, {}).setdefault("ai_chat_routes", {})[route_id] = patch.model_dump(mode="json")
+        write_all(data)
+
+
+def robot_wxid():
+    with LOCK:
+        return read_all().get("_robot_wxid", "")
+
+
+def save_robot_wxid(value):
+    with LOCK:
+        data = read_all()
+        data["_robot_wxid"] = value.strip()
         write_all(data)
 
 
@@ -237,6 +250,12 @@ def dispatch(source, automation, event, *, quotes=None):
         plugin_id: config(event.group_id, plugin_id, legacy, data)
         for plugin_id in BUILTINS if defaults(plugin_id, data).global_enabled
     }
+    trial_settings = enabled.get(chat_trial.PLUGIN_ID)
+    if quotes is None and event.text.strip() == "审判" and trial_settings and trial_settings.enabled:
+        from .plugin.chat_trial.dispatch import dispatch as dispatch_trial
+
+        dispatch_trial(source, event, trial_settings)
+        return
     replies = []
     summary = None
     if quotes is None and chat_summary.PLUGIN_ID in enabled and enabled[chat_summary.PLUGIN_ID].enabled:

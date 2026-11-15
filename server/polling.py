@@ -5,7 +5,7 @@ import structlog
 from .automation import Automation
 from .ciphertalk import SourceError
 from .reply import MessageAuthor, MessageEvent
-from .group_plugins import dispatch as dispatch_builtin
+from .group_plugins import dispatch as dispatch_builtin, robot_wxid
 
 log = structlog.get_logger("wechat_bot.polling")
 PAGE_SIZE = 50
@@ -96,8 +96,9 @@ def poll_group(source, automation: Automation, group_id: str, source_id: str = "
         for start in range(0, len(sender_ids), 100):
             contacts.update(source.conversation_details(sender_ids[start:start + 100]))
     nicknames = source.group_nicknames(group_id) if sender_ids and hasattr(source, "group_nicknames") else {}
+    bot = robot_wxid()
     for event, row in events:
-        if event is not None:
+        if event is not None and event.sender_id != bot:
             contact = contacts.get(event.sender_id, {})
             author = event.author.model_copy(update={
                 "group_nickname": nicknames.get(event.sender_id) or event.author.group_nickname,

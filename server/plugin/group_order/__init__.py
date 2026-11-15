@@ -193,3 +193,15 @@ def handle(source, event, admins, now):
             write(history_path, history)
             write(active_path, active)
         return response
+
+
+def record_trial_warning(group_id, record):
+    directory = ROOT / group_id
+    path = directory / "秩序管理.json"
+    with LOCK:
+        active = read(path, [])
+        history = read(directory / "秩序管理-history.json", {"last30day": [], "other": []})
+        if any(item["id"] == record["id"] for item in active + history["last30day"] + history["other"]):
+            return
+        active.append(record)
+        write(path, active)

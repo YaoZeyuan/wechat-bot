@@ -6,7 +6,7 @@ DEFAULT_SUMMARY = Path(__file__).with_name("default_summary.txt").read_text(enco
 
 PLUGIN_ID = "chat_trial"
 METADATA = {
-    "name": "审判", "description": "配置审判参数并查看本地报告，群消息触发尚未接入",
+    "name": "审判", "description": "配置群内审判、警告和本地报告预览",
     "default_enabled": False, "version": "0.1.0", "capability": "本地 HTML", "group": "群聊工具",
     "fields": [
         {"key": "trial_hours", "label": "审判范围（小时）", "type": "number", "max": 24},
@@ -15,7 +15,8 @@ METADATA = {
         {"key": "trial_intro", "label": "审判引导词", "type": "textarea", "max_length": 16000},
         {"key": "trial_summary", "label": "书记官汇总规则", "type": "textarea", "max_length": 16000},
         {"key": "trial_judges", "label": "法官模型 ID（每行一个，最多三个）", "type": "textarea", "max_length": 768},
-        {"key": "trial_auto_warn", "label": "自动警告（仅生成建议）", "type": "switch"},
+        {"key": "trial_warning_hours", "label": "警告有效期（小时）", "type": "number"},
+        {"key": "trial_auto_warn", "label": "群内审判自动警告", "type": "switch"},
         {"key": "trial_clerk", "label": "书记官模型 ID", "type": "input", "max_length": 256},
         {"key": "trial_prompt", "label": "审判规则", "type": "textarea", "max_length": 16000},
     ],
